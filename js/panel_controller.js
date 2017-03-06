@@ -47,6 +47,7 @@
                 appWindow = windowInfo;
                 inboxWindowId = appWindow.id;
 
+                /* TODO (yan): implement these in main.js
                 appWindow.contentWindow.addEventListener('load', function() {
                     setUnreadCount(storage.get("unreadCount", 0));
                 });
@@ -63,6 +64,7 @@
                     inboxFocused = true;
                     clearAttention();
                 });
+                */
 
                 // close the inbox if background.html is refreshed
                 extension.windows.onSuspend(function() {
@@ -83,12 +85,12 @@
     window.setUnreadCount = function(count) {
         if (count > 0) {
             extension.navigator.setBadgeText(count);
-            if (inboxOpened === true && appWindow) {
+            if (inboxOpened === true && appWindow && appWindow.contentWindow) {
                 appWindow.contentWindow.document.title = "Signal (" + count + ")";
             }
         } else {
             extension.navigator.setBadgeText("");
-            if (inboxOpened === true && appWindow) {
+            if (inboxOpened === true && appWindow && appWindow.contentWindow) {
                 appWindow.contentWindow.document.title = "Signal";
             }
         }
@@ -96,7 +98,7 @@
 
     var open;
     window.openConversation = function(conversation) {
-        if (inboxOpened === true) {
+        if (inboxOpened === true && appWindow.contentWindow) {
             appWindow.contentWindow.openConversation(conversation);
         } else {
             open = conversation;
