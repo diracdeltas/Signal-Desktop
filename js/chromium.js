@@ -52,57 +52,18 @@
     extension.windows = {
         open: function(options, callback) {
             sendMessage(messages.CREATE_WINDOW, options, callback);
-            /* 
-            if (chrome.windows) {
-                chrome.windows.create(options, callback);
-            } else if (chrome.app.window) {
-                var url = options.url;
-                delete options.url;
-                chrome.app.window.create(url, options, callback);
-            }
-            */
         },
 
         focus: function(id, callback) {
             sendMessage(messages.FOCUS_WINDOW, id, callback);
-            /*
-            if (chrome.windows) {
-                chrome.windows.update(id, { focused: true }, function() {
-                    callback(chrome.runtime.lastError);
-                });
-            } else if (chrome.app.window) {
-                var appWindow = chrome.app.window.get(id);
-                if (appWindow) {
-                    appWindow.show();
-                    appWindow.focus();
-                    callback();
-                } else {
-                    callback('No window found for id ' + id);
-                }
-            }
-            */
         },
 
         getCurrent: function(callback) {
             sendMessage(messages.GET_CURRENT_WINDOW, null, callback);
-            /*
-            if (chrome.windows) {
-                chrome.windows.getCurrent(callback);
-            } else if (chrome.app.window) {
-                callback(chrome.app.window.current());
-            }
-            */
         },
 
         remove: function(windowId) {
             sendMessage(messages.REMOVE_WINDOW, windowId);
-            /*
-            if (chrome.windows) {
-                chrome.windows.remove(windowId);
-            } else if (chrome.app.window) {
-                chrome.app.window.get(windowId).close();
-            }
-            */
         },
 
         getBackground: function(callback) {

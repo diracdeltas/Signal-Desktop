@@ -47,6 +47,9 @@
                 appWindow = windowInfo;
                 inboxWindowId = appWindow.id;
 
+                // Close the standalone registration window
+                extension.windows.remove('standalone-installer');
+
                 /* TODO (yan): implement these in main.js
                 appWindow.contentWindow.addEventListener('load', function() {
                     setUnreadCount(storage.get("unreadCount", 0));
