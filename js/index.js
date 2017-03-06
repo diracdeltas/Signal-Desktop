@@ -6,6 +6,7 @@
     'use strict';
 
     function logError(error) {
+        console.log(error)
         extension.windows.getBackground(function(bg) {
             bg.console.log('index.html: ', error);
         });

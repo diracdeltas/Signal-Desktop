@@ -6,6 +6,28 @@
     // Browser specific functions for Chrom*
     window.extension = window.extension || {};
 
+    const ipc = chrome.ipc;
+    const callbackMap = {};
+    const sendMessage = (message, options, callback) => {
+      const id = Math.random().toString();
+      callbackMap[id] = callback;
+      console.log('sending', message, id, options);
+      ipc.send(message, id, options);
+    };
+
+    const messages = {
+      CALLBACK: 'callback',
+      CREATE_WINDOW: 'create-window',
+      GET_CURRENT_WINDOW: 'get-current-window',
+      REMOVE_WINDOW: 'remove-window'
+    };
+
+    ipc.on(messages.CALLBACK, (e, id, arg) => {
+      if (callbackMap[id]) {
+        callbackMap[id](arg);
+      }
+    });
+
     window.extension.navigator = (function () {
         var self = {},
             tabs = {};
@@ -29,6 +51,8 @@
 
     extension.windows = {
         open: function(options, callback) {
+            sendMessage(messages.CREATE_WINDOW, options, callback);
+            /* 
             if (chrome.windows) {
                 chrome.windows.create(options, callback);
             } else if (chrome.app.window) {
@@ -36,6 +60,7 @@
                 delete options.url;
                 chrome.app.window.create(url, options, callback);
             }
+            */
         },
 
         focus: function(id, callback) {
@@ -56,19 +81,25 @@
         },
 
         getCurrent: function(callback) {
+            sendMessage(messages.GET_CURRENT_WINDOW, null, callback);
+            /*
             if (chrome.windows) {
                 chrome.windows.getCurrent(callback);
             } else if (chrome.app.window) {
                 callback(chrome.app.window.current());
             }
+            */
         },
 
         remove: function(windowId) {
+            sendMessage(messages.REMOVE_WINDOW, windowId);
+            /*
             if (chrome.windows) {
                 chrome.windows.remove(windowId);
             } else if (chrome.app.window) {
                 chrome.app.window.get(windowId).close();
             }
+            */
         },
 
         getBackground: function(callback) {
@@ -77,7 +108,6 @@
                 var bg = chrome.extension.getBackgroundPage();
                 bg.storage.onready(function() {
                     callback(bg);
-                    resolve();
                 });
             } else if (chrome.runtime) {
                 chrome.runtime.getBackgroundPage(function(bg) {
@@ -89,7 +119,7 @@
         },
 
         getAll: function() {
-            return chrome.app.window.getAll();
+            return [];
         },
 
         getViews: function() {
@@ -111,7 +141,8 @@
         },
         onClosed: function(callback) {
             // assumes only one front end window
-            if (window.chrome && chrome.app && chrome.app.window) {
+            if (window.chrome && chrome.app && chrome.app.window
+              && chrome.app.window.getAll().length) {
                 return chrome.app.window.getAll()[0].onClosed.addListener(callback);
             } else {
                 window.addEventListener('beforeunload', callback);
@@ -142,12 +173,15 @@
     };
 
     extension.onLaunched = function(callback) {
+      callback()
+      /*
         if (chrome.browserAction && chrome.browserAction.onClicked) {
             chrome.browserAction.onClicked.addListener(callback);
         }
         if (chrome.app && chrome.app.runtime) {
             chrome.app.runtime.onLaunched.addListener(callback);
         }
+      */
     };
 
     // Translate
@@ -170,15 +204,13 @@
             id = 'standalone-installer';
             url = 'register.html';
         }
-        if (!chrome.app.window.get(id)) {
-            extension.windows.open({
-                id: id,
-                url: url,
-                bounds: { width: 800, height: 666, },
-                minWidth: 800,
-                minHeight: 666
-            });
-        }
+        extension.windows.open({
+            id: id,
+            url: url,
+            bounds: { width: 800, height: 666, },
+            minWidth: 800,
+            minHeight: 666
+        });
     };
 
     var notification_pending = Promise.resolve();
