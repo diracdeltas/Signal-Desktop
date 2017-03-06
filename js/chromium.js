@@ -237,6 +237,9 @@
             }
         },
         clear: function() {
+            if (!chrome.notifications) {
+              return
+            }
             notification_pending = notification_pending.then(function() {
                 return new Promise(function(resolve) {
                     chrome.notifications.clear('signal',  resolve);
@@ -244,7 +247,7 @@
             });
         },
         update: function(options) {
-            if (chrome) {
+            if (chrome && chrome.notifications) {
                 var chromeOpts = {
                     type     : options.type,
                     title    : options.title,
