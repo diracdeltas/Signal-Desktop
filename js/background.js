@@ -28,7 +28,7 @@
                 openInbox();
             }
             if (!Whisper.Registration.isDone()) {
-                extension.install();
+                extension.install('standalone');
             }
         });
     });
@@ -221,7 +221,7 @@
 
         if (e.name === 'HTTPError' && (e.code == 401 || e.code == 403)) {
             Whisper.Registration.remove();
-            extension.install();
+            extension.install('standalone');
             return;
         }
 
