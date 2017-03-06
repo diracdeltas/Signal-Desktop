@@ -11,7 +11,6 @@
     const sendMessage = (message, options, callback) => {
       const id = Math.random().toString();
       callbackMap[id] = callback;
-      console.log('sending', message, id, options);
       ipc.send(message, id, options);
     };
 
@@ -19,6 +18,7 @@
       CALLBACK: 'callback',
       CREATE_WINDOW: 'create-window',
       GET_CURRENT_WINDOW: 'get-current-window',
+      FOCUS_WINDOW: 'focus-window',
       REMOVE_WINDOW: 'remove-window'
     };
 
@@ -64,6 +64,8 @@
         },
 
         focus: function(id, callback) {
+            sendMessage(messages.FOCUS_WINDOW, id, callback);
+            /*
             if (chrome.windows) {
                 chrome.windows.update(id, { focused: true }, function() {
                     callback(chrome.runtime.lastError);
@@ -78,6 +80,7 @@
                     callback('No window found for id ' + id);
                 }
             }
+            */
         },
 
         getCurrent: function(callback) {
