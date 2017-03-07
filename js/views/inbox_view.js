@@ -185,7 +185,7 @@
             this.$('.conversation:first .menu').trigger('close');
         },
         reloadBackgroundPage: function() {
-            chrome.runtime.reload();
+            extension.restart();
         },
         showSettings: function() {
             var view = new Whisper.SettingsView();
