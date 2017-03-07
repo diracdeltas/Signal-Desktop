@@ -19,7 +19,8 @@
       CREATE_WINDOW: 'create-window',
       GET_CURRENT_WINDOW: 'get-current-window',
       FOCUS_WINDOW: 'focus-window',
-      REMOVE_WINDOW: 'remove-window'
+      REMOVE_WINDOW: 'remove-window',
+      RESTART: 'restart'
     };
 
     ipc.on(messages.CALLBACK, (e, id, arg) => {
@@ -175,6 +176,10 @@
             minWidth: 800,
             minHeight: 666
         });
+    };
+
+    extension.restart = function() {
+      sendMessage(messages.RESTART);
     };
 
     var notification_pending = Promise.resolve();
