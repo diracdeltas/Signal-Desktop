@@ -27,6 +27,9 @@
             this.thumb = new Whisper.AttachmentPreviewView();
             this.$el.addClass('file-input');
             this.window = options.window;
+            this.$input.bind("click", function(e) {
+                e.stopPropagation();
+            });
         },
 
         events: {
@@ -41,20 +44,7 @@
 
         open: function(e) {
             e.preventDefault();
-            // hack
-            if (this.window && this.window.chrome && this.window.chrome.fileSystem) {
-                this.window.chrome.fileSystem.chooseEntry({type: 'openFile'}, function(entry) {
-                    if (!entry) {
-                        return;
-                    }
-                    entry.file(function(file) {
-                        this.file = file;
-                        this.previewImages();
-                    }.bind(this));
-                }.bind(this));
-            } else {
-                this.$input.click();
-            }
+            this.$input.click();
         },
 
         addThumb: function(src) {
