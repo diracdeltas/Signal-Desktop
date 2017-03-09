@@ -28,14 +28,14 @@
                 openInbox();
             }
             if (!Whisper.Registration.isDone()) {
-                extension.install('standalone');
+                extension.install();
             }
         });
     });
 
-    var SERVER_URL = 'https://textsecure-service-staging.whispersystems.org';
+    var SERVER_URL = 'https://textsecure-service-ca.whispersystems.org';
     var SERVER_PORTS = [80, 4433, 8443];
-    var ATTACHMENT_SERVER_URL = 'https://whispersystems-textsecure-attachments-staging.s3.amazonaws.com';
+    var ATTACHMENT_SERVER_URL = 'https://whispersystems-textsecure-attachments.s3.amazonaws.com';
     var messageReceiver;
     window.getSocketStatus = function() {
         if (messageReceiver) {
@@ -221,7 +221,7 @@
 
         if (e.name === 'HTTPError' && (e.code == 401 || e.code == 403)) {
             Whisper.Registration.remove();
-            extension.install('standalone');
+            extension.install();
             return;
         }
 
