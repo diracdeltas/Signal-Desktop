@@ -8,7 +8,11 @@
         console.log(e);
     };
 
-    console.log('background page reloaded');
+    console.log('background page reloaded ' + window.location);
+    const isDevelopment = window.location.hash === '#dev';
+    if (isDevelopment) {
+      console.log('running in development mode');
+    }
     extension.notification.init();
 
     // Close and reopen existing windows
@@ -28,14 +32,18 @@
                 openInbox();
             }
             if (!Whisper.Registration.isDone()) {
-                extension.install('standalone');
+                extension.install(isDevelopment ? 'standalone' : undefined);
             }
         });
     });
 
-    var SERVER_URL = 'https://textsecure-service-staging.whispersystems.org';
+    var SERVER_URL = isDevelopment
+        ? 'https://textsecure-service-staging.whispersystems.org'
+        : 'https://textsecure-service-ca.whispersystems.org';
     var SERVER_PORTS = [80, 4433, 8443];
-    var ATTACHMENT_SERVER_URL = 'https://whispersystems-textsecure-attachments-staging.s3.amazonaws.com';
+    var ATTACHMENT_SERVER_URL = isDevelopment
+        ? 'https://whispersystems-textsecure-attachments-staging.s3.amazonaws.com'
+        : 'https://whispersystems-textsecure-attachments.s3.amazonaws.com';
     var messageReceiver;
     window.getSocketStatus = function() {
         if (messageReceiver) {
@@ -221,7 +229,7 @@
 
         if (e.name === 'HTTPError' && (e.code == 401 || e.code == 403)) {
             Whisper.Registration.remove();
-            extension.install('standalone');
+            extension.install(isDevelopment ? 'standalone' : undefined);
             return;
         }
 
