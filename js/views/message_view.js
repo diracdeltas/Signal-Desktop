@@ -128,7 +128,8 @@
             'click .error-icon': 'select',
             'click .timestamp': 'select',
             'click .status': 'select',
-            'click .error-message': 'select'
+            'click .error-message': 'select',
+            'click .body a': 'openLink'
         },
         retryMessage: function() {
             var retrys = _.filter(this.model.get('errors'),
@@ -136,6 +137,9 @@
             _.map(retrys, 'number').forEach(function(number) {
                 this.model.resend(number);
             }.bind(this));
+        },
+        openLink: function(e) {
+            chrome.ipc.send('open-link', e.target.href, {});
         },
         onExpired: function() {
             this.$el.addClass('expired');
