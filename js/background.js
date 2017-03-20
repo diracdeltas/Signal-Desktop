@@ -15,27 +15,8 @@
     }
     extension.notification.init();
 
-    // Close and reopen existing windows
-    var open = false;
-    extension.windows.getAll().forEach(function(appWindow) {
-        open = true;
-        appWindow.close();
-    });
-
     // start a background worker for ecc
     textsecure.startWorker('/js/libsignal-protocol-worker.js');
-
-    extension.onLaunched(function() {
-        console.log('extension launched');
-        storage.onready(function() {
-            if (Whisper.Registration.everDone()) {
-                openInbox();
-            }
-            if (!Whisper.Registration.isDone()) {
-                extension.install(isDevelopment ? 'standalone' : undefined);
-            }
-        });
-    });
 
     var SERVER_URL = isDevelopment
         ? 'https://textsecure-service-staging.whispersystems.org'
@@ -73,12 +54,18 @@
 
     storage.fetch();
     storage.onready(function() {
+        console.log('storage ready')
         window.dispatchEvent(new Event('storage_ready'));
         setUnreadCount(storage.get("unreadCount", 0));
 
+        if (Whisper.Registration.everDone()) {
+            openInbox();
+        }
         if (Whisper.Registration.isDone()) {
             extension.keepAwake();
             init();
+        } else {
+            extension.install(isDevelopment ? 'standalone' : undefined);
         }
 
         console.log("listening for registration events");
@@ -87,10 +74,6 @@
             extension.keepAwake();
             init(true);
         });
-
-        if (open) {
-            openInbox();
-        }
 
         WallClockListener.init();
         RotateSignedPreKeyListener.init();
