@@ -36695,6 +36695,23 @@ Internal.SessionLock.queueJobForNumber = function queueJobForNumber(number, runJ
     var calculateMAC = libsignal.crypto.calculateMAC;
     var verifyMAC    = libsignal.crypto.verifyMAC;
 
+    function verifyDigest(data, theirDigest) {
+        return crypto.subtle.digest({name: 'SHA-256'}, data).then(function(ourDigest) {
+            var a = new Uint8Array(ourDigest);
+            var b = new Uint8Array(theirDigest);
+            var result = 0;
+            for (var i=0; i < theirDigest.byteLength; ++i) {
+                result = result | (a[i] ^ b[i]);
+            }
+            if (result !== 0) {
+              throw new Error('Bad digest');
+            }
+        });
+    }
+    function calculateDigest(data) {
+        return crypto.subtle.digest({name: 'SHA-256'}, data);
+    }
+
     window.textsecure = window.textsecure || {};
     window.textsecure.crypto = {
         // Decrypts message into a raw string
@@ -36724,7 +36741,7 @@ Internal.SessionLock.queueJobForNumber = function queueJobForNumber(number, runJ
             });
         },
 
-        decryptAttachment: function(encryptedBin, keys) {
+        decryptAttachment: function(encryptedBin, keys, theirDigest) {
             if (keys.byteLength != 64) {
                 throw new Error("Got invalid length attachment keys");
             }
@@ -36741,6 +36758,10 @@ Internal.SessionLock.queueJobForNumber = function queueJobForNumber(number, runJ
             var mac = encryptedBin.slice(encryptedBin.byteLength - 32, encryptedBin.byteLength);
 
             return verifyMAC(ivAndCiphertext, mac_key, mac, 32).then(function() {
+                if (theirDigest !== undefined) {
+                  return verifyDigest(encryptedBin, theirDigest);
+                }
+            }).then(function() {
                 return decrypt(aes_key, ciphertext, iv);
             });
         },
@@ -36764,7 +36785,9 @@ Internal.SessionLock.queueJobForNumber = function queueJobForNumber(number, runJ
                     var encryptedBin = new Uint8Array(16 + ciphertext.byteLength + 32);
                     encryptedBin.set(ivAndCiphertext);
                     encryptedBin.set(new Uint8Array(mac), 16 + ciphertext.byteLength);
-                    return encryptedBin.buffer;
+                    return calculateDigest(encryptedBin.buffer).then(function(digest) {
+                        return { ciphertext: encryptedBin.buffer, digest: digest };
+                    });
                 });
             });
         },
@@ -37637,7 +37660,7 @@ var TextSecureServer = (function() {
         attachment : "v1/attachments"
     };
 
-    function TextSecureServer(url, ports, username, password, attachment_server_url) {
+    function TextSecureServer(url, ports, username, password) {
         if (typeof url !== 'string') {
             throw new Error('Invalid server url');
         }
@@ -37645,17 +37668,6 @@ var TextSecureServer = (function() {
         this.url = url;
         this.username = username;
         this.password = password;
-
-        this.attachment_id_regex = RegExp("^https:\/\/.*\/(\\d+)\?");
-        if (attachment_server_url) {
-            // strip trailing /
-            attachment_server_url = attachment_server_url.replace(/\/$/,'');
-            // and escape
-            attachment_server_url = attachment_server_url.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-            this.attachment_id_regex = RegExp( "^" + attachment_server_url + "\/(\\d+)\?");
-        }
-
-
     }
 
     TextSecureServer.prototype = {
@@ -37859,11 +37871,6 @@ var TextSecureServer = (function() {
                 urlParameters       : '/' + id,
                 validateResponse    : {location: 'string'}
             }).then(function(response) {
-                var match = response.location.match(this.attachment_id_regex);
-                if (!match) {
-                    console.log('Invalid attachment url for incoming message', response.location);
-                    throw new Error('Received invalid attachment url');
-                }
                 return ajax(response.location, {
                     type        : "GET",
                     responseType: "arraybuffer",
@@ -37876,20 +37883,13 @@ var TextSecureServer = (function() {
                 call     : 'attachment',
                 httpType : 'GET',
             }).then(function(response) {
-                // Extract the id as a string from the location url
-                // (workaround for ids too large for Javascript numbers)
-                var match = response.location.match(this.attachment_id_regex);
-                if (!match) {
-                    console.log('Invalid attachment url for outgoing message', response.location);
-                    throw new Error('Received invalid attachment url');
-                }
                 return ajax(response.location, {
                     type        : "PUT",
                     contentType : "application/octet-stream",
                     data        : encryptedBin,
                     processData : false,
                 }).then(function() {
-                    return match[1];
+                    return response.idString;
                 }.bind(this));
             }.bind(this));
         },
@@ -38203,12 +38203,12 @@ var TextSecureServer = (function() {
  * vim: ts=4:sw=4:expandtab
  */
 
-function MessageReceiver(url, ports, username, password, signalingKey, attachment_server_url) {
+function MessageReceiver(url, ports, username, password, signalingKey) {
     this.url = url;
     this.signalingKey = signalingKey;
     this.username = username;
     this.password = password;
-    this.server = new TextSecureServer(url, ports, username, password, attachment_server_url);
+    this.server = new TextSecureServer(url, ports, username, password);
 
     var address = libsignal.SignalProtocolAddress.fromString(username);
     this.number = address.getName();
@@ -38539,10 +38539,12 @@ MessageReceiver.prototype.extend({
         return textsecure.storage.get('blocked', []).indexOf(number) >= 0;
     },
     handleAttachment: function(attachment) {
+        var digest = attachment.digest ? attachment.digest.toArrayBuffer() : undefined;
         function decryptAttachment(encrypted) {
             return textsecure.crypto.decryptAttachment(
                 encrypted,
-                attachment.key.toArrayBuffer()
+                attachment.key.toArrayBuffer(),
+                digest
             );
         }
 
@@ -38677,8 +38679,8 @@ MessageReceiver.prototype.extend({
 
 window.textsecure = window.textsecure || {};
 
-textsecure.MessageReceiver = function(url, ports, username, password, signalingKey, attachment_server_url) {
-    var messageReceiver = new MessageReceiver(url, ports, username, password, signalingKey, attachment_server_url);
+textsecure.MessageReceiver = function(url, ports, username, password, signalingKey) {
+    var messageReceiver = new MessageReceiver(url, ports, username, password, signalingKey);
     this.addEventListener    = messageReceiver.addEventListener.bind(messageReceiver);
     this.removeEventListener = messageReceiver.removeEventListener.bind(messageReceiver);
     this.getStatus           = messageReceiver.getStatus.bind(messageReceiver);
@@ -39026,8 +39028,8 @@ Message.prototype = {
     }
 };
 
-function MessageSender(url, ports, username, password, attachment_server_url) {
-    this.server = new TextSecureServer(url, ports, username, password, attachment_server_url);
+function MessageSender(url, ports, username, password) {
+    this.server = new TextSecureServer(url, ports, username, password);
     this.pendingMessages = {};
 }
 
@@ -39041,10 +39043,11 @@ MessageSender.prototype = {
         proto.key = libsignal.crypto.getRandomBytes(64);
 
         var iv = libsignal.crypto.getRandomBytes(16);
-        return textsecure.crypto.encryptAttachment(attachment.data, proto.key, iv).then(function(encryptedBin) {
-            return this.server.putAttachment(encryptedBin).then(function(id) {
+        return textsecure.crypto.encryptAttachment(attachment.data, proto.key, iv).then(function(result) {
+            return this.server.putAttachment(result.ciphertext).then(function(id) {
                 proto.id = id;
                 proto.contentType = attachment.contentType;
+                proto.digest = result.digest;
                 return proto;
             });
         }.bind(this));
@@ -39433,8 +39436,8 @@ MessageSender.prototype = {
 
 window.textsecure = window.textsecure || {};
 
-textsecure.MessageSender = function(url, ports, username, password, attachment_server_url) {
-    var sender = new MessageSender(url, ports, username, password, attachment_server_url);
+textsecure.MessageSender = function(url, ports, username, password) {
+    var sender = new MessageSender(url, ports, username, password);
     textsecure.replay.registerFunction(sender.tryMessageAgain.bind(sender), textsecure.replay.Type.ENCRYPT_MESSAGE);
     textsecure.replay.registerFunction(sender.retransmitMessage.bind(sender), textsecure.replay.Type.TRANSMIT_MESSAGE);
     textsecure.replay.registerFunction(sender.sendMessage.bind(sender), textsecure.replay.Type.REBUILD_MESSAGE);

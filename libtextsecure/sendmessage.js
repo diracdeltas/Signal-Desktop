@@ -104,8 +104,8 @@ Message.prototype = {
     }
 };
 
-function MessageSender(url, ports, username, password, attachment_server_url) {
-    this.server = new TextSecureServer(url, ports, username, password, attachment_server_url);
+function MessageSender(url, ports, username, password) {
+    this.server = new TextSecureServer(url, ports, username, password);
     this.pendingMessages = {};
 }
 
@@ -119,10 +119,11 @@ MessageSender.prototype = {
         proto.key = libsignal.crypto.getRandomBytes(64);
 
         var iv = libsignal.crypto.getRandomBytes(16);
-        return textsecure.crypto.encryptAttachment(attachment.data, proto.key, iv).then(function(encryptedBin) {
-            return this.server.putAttachment(encryptedBin).then(function(id) {
+        return textsecure.crypto.encryptAttachment(attachment.data, proto.key, iv).then(function(result) {
+            return this.server.putAttachment(result.ciphertext).then(function(id) {
                 proto.id = id;
                 proto.contentType = attachment.contentType;
+                proto.digest = result.digest;
                 return proto;
             });
         }.bind(this));
@@ -511,8 +512,8 @@ MessageSender.prototype = {
 
 window.textsecure = window.textsecure || {};
 
-textsecure.MessageSender = function(url, ports, username, password, attachment_server_url) {
-    var sender = new MessageSender(url, ports, username, password, attachment_server_url);
+textsecure.MessageSender = function(url, ports, username, password) {
+    var sender = new MessageSender(url, ports, username, password);
     textsecure.replay.registerFunction(sender.tryMessageAgain.bind(sender), textsecure.replay.Type.ENCRYPT_MESSAGE);
     textsecure.replay.registerFunction(sender.retransmitMessage.bind(sender), textsecure.replay.Type.TRANSMIT_MESSAGE);
     textsecure.replay.registerFunction(sender.sendMessage.bind(sender), textsecure.replay.Type.REBUILD_MESSAGE);
