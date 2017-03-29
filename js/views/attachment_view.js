@@ -101,22 +101,14 @@
         return suggestion;
     },
     saveFile: function() {
-        var blob = this.blob;
-        var w = extension.windows.getViews()[0];
-        if (w && w.chrome && w.chrome.fileSystem) {
-            w.chrome.fileSystem.chooseEntry({
-                type: 'saveFile', suggestedName: this.suggestedName()
-            }, function(entry) {
-                if (!entry) {
-                    return;
-                }
-                entry.createWriter(function(fileWriter) {
-                    fileWriter.write(blob);
-                });
-            });
-        } else {
-            console.log('Failed to get window');
-        }
+        var a = $("<a style='display: none;'/>");
+        var url = window.URL.createObjectURL(this.blob, {type: "octet/stream"});
+        a.attr("href", url);
+        a.attr("download", this.suggestedName());
+        $("body").append(a);
+        a[0].click();
+        window.URL.revokeObjectURL(url);
+        a.remove();
     },
     render: function() {
         var View;
