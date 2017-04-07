@@ -1,5 +1,6 @@
 if (!window.chrome.i18n) {
-  let localesFile = `chrome-extension://iopnjipkpnmbpjaalcjcpcbfcnjknmmo/_locales/en/messages.json`
+  let lang = navigator.language ? navigator.language : 'en'
+  let localesFile = "chrome-extension://iopnjipkpnmbpjaalcjcpcbfcnjknmmo/_locales/" + lang + "/messages.json"
   window.fetch(localesFile).then((response) => {
     response.json().then((json) => {
       console.log('initialize localization', localesFile)
