@@ -139,7 +139,7 @@
             }.bind(this));
         },
         openLink: function(e) {
-            chrome.ipc.send('open-link', e.target.href, {});
+            chrome.ipcRenderer.send('open-link', e.target.href, {});
         },
         onExpired: function() {
             this.$el.addClass('expired');

@@ -6,7 +6,7 @@
     // Browser specific functions for Chrom*
     window.extension = window.extension || {};
 
-    const ipc = chrome.ipc;
+    const ipc = chrome.ipcRenderer;
     const callbackMap = {};
     const sendMessage = (message, options, callback) => {
       const id = Math.random().toString();
