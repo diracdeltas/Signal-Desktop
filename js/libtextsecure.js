@@ -36314,7 +36314,7 @@ SessionCipher.prototype = {
             var errors = [];
             return this.decryptWithSessionList(buffer, record.getSessions(), errors).then(function(result) {
                 return this.getRecord(address).then(function(record) {
-                    if (result.session !== record.getOpenSession()) {
+                    if (result.session.indexInfo.baseKey !== record.getOpenSession().indexInfo.baseKey) {
                       record.archiveCurrentState();
                       record.promoteState(result.session);
                     }
@@ -37958,10 +37958,13 @@ var TextSecureServer = (function() {
                 return new Promise(function(resolve, reject) {
                     var socket = getSocket();
                     socket.onclose = function(e) {
-                        console.log('websocket closed', e.code);
+                        console.log('provisioning socket closed', e.code);
                         if (!gotProvisionEnvelope) {
                             reject(new Error('websocket closed'));
                         }
+                    };
+                    socket.onopen = function(e) {
+                        console.log('provisioning socket open');
                     };
                     var wsr = new WebSocketResource(socket, {
                         keepalive: { path: '/v1/keepalive/provisioning' },
@@ -38212,7 +38215,6 @@ MessageReceiver.prototype.extend({
         if (this.socket && this.socket.readyState !== WebSocket.CLOSED) {
             this.socket.close();
         }
-        console.log('opening websocket');
         // initialize the socket and start listening for messages
         this.socket = this.server.getMessageSocket();
         this.socket.onclose = this.onclose.bind(this);
@@ -38253,8 +38255,13 @@ MessageReceiver.prototype.extend({
         // We do the message decryption here, instead of in the ordered pending queue,
         // to avoid exposing the time it took us to process messages through the time-to-ack.
 
-        // TODO: handle different types of requests. for now we blindly assume
-        // PUT /messages <encrypted Envelope>
+        // TODO: handle different types of requests.
+        if (request.path !== '/api/v1/message') {
+            console.log('got request', request.verb, request.path);
+            request.respond(200, 'OK');
+            return;
+        }
+
         textsecure.crypto.decryptWebsocketMessage(request.body, this.signalingKey).then(function(plaintext) {
             var envelope = textsecure.protobuf.Envelope.decode(plaintext);
             // After this point, decoding errors are not the server's

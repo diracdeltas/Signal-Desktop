@@ -30,7 +30,7 @@
             return -1;
         }
     };
-    window.events = _.clone(Backbone.Events);
+    Whisper.events = _.clone(Backbone.Events);
     var accountManager;
     window.getAccountManager = function() {
         if (!accountManager) {
@@ -45,7 +45,7 @@
                 }
                 Whisper.Registration.markDone();
                 console.log("dispatching registration event");
-                events.trigger('registration_done');
+                Whisper.events.trigger('registration_done');
             });
         }
         return accountManager;
@@ -69,15 +69,19 @@
         }
 
         console.log("listening for registration events");
-        events.on('registration_done', function() {
+        Whisper.events.on('registration_done', function() {
             console.log("handling registration event");
             extension.keepAwake();
             init(true);
         });
 
-        WallClockListener.init();
-        RotateSignedPreKeyListener.init();
-        ExpiringMessagesListener.init();
+        if (open) {
+            openInbox();
+        }
+
+        Whisper.WallClockListener.init(Whisper.events);
+        Whisper.RotateSignedPreKeyListener.init(Whisper.events);
+        Whisper.ExpiringMessagesListener.init(Whisper.events);
     });
 
     window.getSyncRequest = function() {
@@ -109,19 +113,21 @@
         window.textsecure.messaging = new textsecure.MessageSender(
             SERVER_URL, SERVER_PORTS, USERNAME, PASSWORD
         );
+
         if (firstRun === true && textsecure.storage.user.getDeviceId() != '1') {
             if (!storage.get('theme-setting') && textsecure.storage.get('userAgent') === 'OWI') {
                 storage.put('theme-setting', 'ios');
             }
             var syncRequest = new textsecure.SyncRequest(textsecure.messaging, messageReceiver);
+            Whisper.events.trigger('contactsync:begin');
             syncRequest.addEventListener('success', function() {
                 console.log('sync successful');
                 storage.put('synced_at', Date.now());
-                window.dispatchEvent(new Event('textsecure:contactsync'));
+                Whisper.events.trigger('contactsync');
             });
             syncRequest.addEventListener('timeout', function() {
                 console.log('sync timed out');
-                window.dispatchEvent(new Event('textsecure:contactsync'));
+                Whisper.events.trigger('contactsync');
             });
         }
     }
@@ -209,6 +215,7 @@
 
         if (e.name === 'HTTPError' && (e.code == 401 || e.code == 403)) {
             Whisper.Registration.remove();
+            Whisper.events.trigger('unauthorized');
             extension.install(isDevelopment ? 'standalone' : undefined);
             return;
         }
@@ -218,6 +225,8 @@
             if (navigator.onLine) {
                 console.log('retrying in 1 minute');
                 setTimeout(init, 60000);
+
+                Whisper.events.trigger('reconnectTimer');
             } else {
                 console.log('offline');
                 messageReceiver.close();
@@ -282,4 +291,31 @@
             timestamp: timestamp, source: pushMessage.source
         });
     }
+
+    window.owsDesktopApp = {
+        getAppView: function(destWindow) {
+
+            var self = this;
+
+            return ConversationController.updateInbox().then(function() {
+                try {
+                    if (self.inboxView) { self.inboxView.remove(); }
+                    self.inboxView = new Whisper.InboxView({model: self, window: destWindow});
+                    self.openConversation(getOpenConversation());
+
+                    return self.inboxView;
+
+                } catch (e) {
+                    console.log(e);
+                }
+            });
+        },
+        openConversation: function(conversation) {
+            if (this.inboxView && conversation) {
+                this.inboxView.openConversation(null, conversation);
+            }
+        }
+    };
+
+
 })();
