@@ -213,12 +213,18 @@
         },
 
         readFile: function(file) {
-            var contentType = file.type;
             return new Promise(function(resolve, reject) {
                 var FR = new FileReader();
                 FR.onload = function(e) {
-                    resolve({data: e.target.result, contentType: contentType});
+                    resolve({
+                      data: e.target.result,
+                      contentType: file.type,
+                      fileName: file.name,
+                      size: file.size
+                    });
                 };
+                FR.onerror = reject;
+                FR.onabort = reject;
                 FR.readAsArrayBuffer(file);
             });
         },
