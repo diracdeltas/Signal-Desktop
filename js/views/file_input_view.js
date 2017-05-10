@@ -118,11 +118,7 @@
                     this.addThumb(this.oUrl);
                     break;
                 default:
-                    var toast = new Whisper.UnsupportedFileTypeToast();
-                    toast.$el.insertAfter(this.$el);
-                    toast.render();
-                    this.deleteFiles();
-                    return;
+                    this.addThumb('/images/file.svg'); break;
             }
 
             this.autoScale(file).then(function(blob) {
@@ -132,7 +128,7 @@
                     case 'image':
                         limitKb = 6000; break;
                     case 'gif':
-                        limitKb = 6000; break;
+                        limitKb = 25000; break;
                     case 'audio':
                         limitKb = 100000; break;
                     case 'video':
