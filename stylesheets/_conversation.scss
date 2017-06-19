@@ -16,7 +16,7 @@
 }
 
 .conversation {
-  background-color: #ffffff;
+  background-color: white;
   height: 100%;
 
   .panel {
@@ -51,11 +51,15 @@
         height: 100%;
         width: 100%;
         margin: 0;
-        padding: 2em 20px 0;
-        overflow-y: auto;
+        padding: 10px 0 0 0;
+        overflow-y: overlay;
       }
     }
   }
+}
+
+.discussion-container {
+  background-color: #eee;
 }
 
 .key-verification {
@@ -70,10 +74,10 @@
     -webkit-user-select: text;
   }
   .key {
-    display: inline-block;
     font-family: monospace;
     padding: 10px;
-    margin-bottom: 20px;
+    margin: 20px auto 20px auto;
+    width: 16em;
     background: $grey_l;
     border: solid 1px $grey_l2;
     border-radius: $border-radius;
@@ -100,6 +104,8 @@
 }
 
 .message-detail {
+  background-color: #eee;
+
   .key-conflict-dialogue {
     border-radius: $border-radius;
     margin: 20px 0;
@@ -135,7 +141,6 @@
   }
 
   .message-container {
-    background: white;
     padding: 20px 0;
 
     .sender {
@@ -295,6 +300,9 @@ li.entry .error-icon-container {
   li {
     max-width: 800px;
     margin: 0 auto 10px;
+    padding-left: 1em;
+    // we need more padding on right side because scroll bar overlaps
+    padding-right: 1.5em;
 
     &::after {
       visibility: hidden;
@@ -466,34 +474,51 @@ li.entry .error-icon-container {
     }
 
     .fileView {
+      display: flex;
+      align-items: center;
+
       position: relative;
       padding: 5px;
       padding-right: 10px;
-      background-color: #fafafa;
-      border: 1px solid $grey_l2;
-      border-radius: $border-radius;
-      cursor: pointer;
-      color: $grey_d;
 
-      .icon, .fileName {
+      cursor: pointer;
+
+      .fileName {
+        font-weight: bold;
+        margin-bottom: 0.25em;
+      }
+
+      .icon, .text {
         opacity: 0.75;
       }
 
       &:hover {
-        .icon, .fileName {
+        .icon, .text {
           opacity: 1.0;
         }
       }
 
       .icon {
+        margin-left: -0.5em;
+        margin-right: 0.5em;
         display: inline-block;
         vertical-align: middle;
         &:before {
           content: '';
           display: inline-block;
-          width: $button-height;
-          height: $button-height;
-          @include color-svg('/images/file.svg', black);
+          width: $button-height * 2;
+          height: $button-height * 2;
+          @include color-svg('/images/file.svg', $grey_d);
+        }
+
+        &.audio:before {
+          @include color-svg('/images/audio.svg', $grey_d);
+        }
+        &.video:before {
+          @include color-svg('/images/video.svg', $grey_d);
+        }
+        &.voice:before {
+          @include color-svg('/images/voice.svg', $grey_d);
         }
       }
     }
@@ -601,6 +626,10 @@ li.entry .error-icon-container {
     float: right;
     height: 36px;
   }
+  .android-length-warning {
+    padding: 10px;
+    max-width:150px;
+  }
 
 }
 
@@ -625,7 +654,7 @@ li.entry .error-icon-container {
     background: white;
     border-radius: $border-radius;
     overflow: auto;
-    box-shadow: 0px 3px 5px 0px rgba(0,0,0,0.2);
+    box-shadow: 0px 0px 15px 0px rgba(0, 0, 0, 0.3);
 
     .message {
       text-align: center;
@@ -658,10 +687,78 @@ li.entry .error-icon-container {
 .message-list li.keychange {
   text-align: center;
   .content {
+    cursor: pointer;
     display: inline-block;
     padding: 5px 10px;
     background: #fff5c4;
     color: $grey_d;
     border-radius: $border-radius;
+  }
+}
+
+.message-list .last-seen-indicator-view {
+  // This padding is large so we clear the avatar circle extending into the conversation
+  // window.scrollIntoView() doesn't honor margins, so we're using padding
+  // padding-top is less to account for the 10px margin at the bottom of messages
+  padding-top: 25px;
+  padding-bottom: 35px;
+
+
+  .bar {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+
+    padding: 5px;
+
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.055);
+
+    background-color: rgba(0, 0, 0, 0.05);
+  }
+
+  .text {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    background-color: white;
+    border-radius: 1.5em;
+    padding: 10px 21px 9px 21px;
+  }
+}
+
+.discussion-container .scroll-down-button-view {
+  position: absolute;
+  right: 20px;
+  bottom: 10px;
+
+  button {
+    height: 44px;
+    width: 44px;
+    border-radius: 22px;
+    text-align: center;
+    background-color: white;
+    border: none;
+    box-shadow: 0px 3px 5px 0px rgba(0,0,0,0.2);
+
+    .icon {
+      @include color-svg('/images/down.svg', $grey_l3);
+      height: 100%;
+      width: 100%;
+    }
+    .icon:hover {
+      background-color: #616161;
+    }
+
+    &.new-messages  {
+      background-color: $blue;
+      .icon {
+        @include color-svg('/images/down.svg', white);
+      }
+
+      &:hover {
+        background-color: #1472bd;
+      }
+    }
   }
 }

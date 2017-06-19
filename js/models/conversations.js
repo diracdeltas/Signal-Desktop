@@ -46,17 +46,10 @@
 
         this.on('change:avatar', this.updateAvatarUrl);
         this.on('destroy', this.revokeAvatarUrl);
-        this.on('read', this.onReadMessage);
-        this.fetchContacts().then(function() {
-            this.contactCollection.each(function(contact) {
-                textsecure.storage.protocol.on('keychange:' + contact.id, function() {
-                    this.addKeyChange(contact.id);
-                }.bind(this));
-            }.bind(this));
-        }.bind(this));
     },
 
     addKeyChange: function(id) {
+        console.log('adding key change advisory for', this.id, this.get('timestamp'));
         var timestamp = Date.now();
         var message = new Whisper.Message({
             conversationId : this.id,
@@ -73,8 +66,19 @@
             this.messageCollection.get(message.id).fetch();
         }
 
-        return this.getUnread().then(function(unreadMessages) {
-            this.save({unreadCount: unreadMessages.length});
+        // We mark as read everything older than this message - to clean up old stuff
+        //   still marked unread in the database. If the user generally doesn't read in
+        //   the desktop app, so the desktop app only gets read receipts, we can very
+        //   easily end up with messages never marked as read (our previous early read
+        //   receipt handling, read receipts never sent because app was offline)
+
+        // We queue it because we often get a whole lot of read receipts at once, and
+        //   their markRead calls could very easily overlap given the async pull from DB.
+
+        // Lastly, we don't send read receipts for any message marked read due to a read
+        //   receipt. That's a notification explosion we don't need.
+        this.queueJob(function() {
+            return this.markRead(message.get('received_at'), {sendReadReceipts: false});
         }.bind(this));
     },
 
@@ -172,7 +176,6 @@
             message.save();
 
             this.save({
-                unreadCount : 0,
                 active_at   : now,
                 timestamp   : now,
                 lastMessage : message.getNotificationText()
@@ -298,36 +301,47 @@
         }
     },
 
-    markRead: function() {
-        if (this.get('unreadCount') > 0) {
-            this.save({ unreadCount: 0 });
-            var conversationId = this.id;
-            Whisper.Notifications.remove(Whisper.Notifications.where({
-                conversationId: conversationId
-            }));
+    markRead: function(newestUnreadDate, options) {
+        options = options || {};
+        _.defaults(options, {sendReadReceipts: true});
 
-            this.getUnread().then(function(unreadMessages) {
-                var read = unreadMessages.map(function(m) {
-                    if (this.messageCollection.get(m.id)) {
-                        m = this.messageCollection.get(m.id);
-                    }
-                    m.markRead();
-                    return {
-                        sender    : m.get('source'),
-                        timestamp : m.get('sent_at')
-                    };
-                }.bind(this));
-                if (read.length > 0) {
-                    console.log('Sending', read.length, 'read receipts');
-                    textsecure.messaging.syncReadMessages(read);
+        var conversationId = this.id;
+        Whisper.Notifications.remove(Whisper.Notifications.where({
+            conversationId: conversationId
+        }));
+
+        return this.getUnread().then(function(unreadMessages) {
+            var oldUnread = unreadMessages.filter(function(message) {
+                return message.get('received_at') <= newestUnreadDate;
+            });
+
+            var read = _.map(oldUnread, function(m) {
+                if (this.messageCollection.get(m.id)) {
+                    m = this.messageCollection.get(m.id);
+                } else {
+                    console.log('Marked a message as read in the database, but ' +
+                                'it was not in messageCollection.');
                 }
+                m.markRead();
+                return {
+                    sender    : m.get('source'),
+                    timestamp : m.get('sent_at')
+                };
             }.bind(this));
-        }
+
+            var unreadCount = unreadMessages.length - read.length;
+            this.save({ unreadCount: unreadCount });
+
+            if (read.length && options.sendReadReceipts) {
+                console.log('Sending', read.length, 'read receipts');
+                textsecure.messaging.syncReadMessages(read);
+            }
+        }.bind(this));
     },
 
     fetchMessages: function() {
         if (!this.id) { return false; }
-        return this.messageCollection.fetchConversation(this.id);
+        return this.messageCollection.fetchConversation(this.id, null, this.get('unreadCount'));
     },
 
     fetchContacts: function(options) {
@@ -631,4 +645,21 @@
   });
 
   Whisper.Conversation.COLORS = COLORS.concat(['grey', 'default']).join(' ');
+
+  // Special collection for fetching all the groups a certain number appears in
+  Whisper.GroupCollection = Backbone.Collection.extend({
+    database: Whisper.Database,
+    storeName: 'conversations',
+    model: Whisper.Conversation,
+    fetchGroups: function(number) {
+        return new Promise(function(resolve) {
+            this.fetch({
+                index: {
+                    name: 'group',
+                    only: number
+                }
+            }).always(resolve);
+        }.bind(this));
+    }
+  });
 })();

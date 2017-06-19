@@ -27,14 +27,13 @@
     });
     var TimerView = Whisper.View.extend({
         templateName: 'hourglass',
-        className: 'timer',
-        initialize: function() {
-            this.update();
-        },
         update: function() {
             if (this.timeout) {
               clearTimeout(this.timeout);
               this.timeout = null;
+            }
+            if (this.model.isExpired()) {
+                return this;
             }
             if (this.model.isExpiring()) {
                 this.render();
@@ -42,8 +41,8 @@
                 var remainingTime = this.model.msTilExpire();
                 var elapsed = (totalTime - remainingTime) / totalTime;
                 this.$('.sand').css('transform', 'translateY(' + elapsed*100 + '%)');
-                this.timeout = setTimeout(this.update.bind(this), totalTime / 100);
                 this.$el.css('display', 'inline-block');
+                this.timeout = setTimeout(this.update.bind(this), Math.max(totalTime / 100, 500));
             }
             return this;
         }
@@ -215,8 +214,9 @@
         },
         renderExpiring: function() {
             if (!this.timerView) {
-              this.timerView = new TimerView({ model: this.model, el: this.$('.timer') });
+              this.timerView = new TimerView({ model: this.model });
             }
+            this.timerView.setElement(this.$('.timer'));
             this.timerView.update();
         },
         render: function() {
@@ -264,19 +264,48 @@
             }))();
             this.$('.avatar').replaceWith(avatarView.render().$('.avatar'));
         },
+        appendAttachmentView: function(view) {
+            // We check for a truthy 'updated' here to ensure that a race condition in a
+            //   multi-fetch() scenario doesn't add an AttachmentView to the DOM before
+            //   its 'update' event is triggered.
+            var parent = this.$('.attachments')[0];
+            if (view.updated && parent !== view.el.parentNode) {
+                if (view.el.parentNode) {
+                    view.el.parentNode.removeChild(view.el);
+                }
+
+                this.trigger('beforeChangeHeight');
+                this.$('.attachments').append(view.el);
+                view.setElement(view.el);
+                this.trigger('afterChangeHeight');
+            }
+        },
         loadAttachments: function() {
+            this.loadedAttachments = this.loadedAttachments || [];
+
+            // If we're called a second time, render() has replaced the DOM out from under
+            //   us with $el.html(). We'll need to reattach our AttachmentViews to the new
+            //   parent DOM nodes if the 'update' event has already fired.
+            if (this.loadedAttachments.length) {
+                for (var i = 0, max = this.loadedAttachments.length; i < max; i += 1) {
+                    var view = this.loadedAttachments[i];
+                    this.appendAttachmentView(view);
+                }
+                return;
+            }
+
             this.model.get('attachments').forEach(function(attachment) {
                 var view = new Whisper.AttachmentView({
                   model: attachment,
                   timestamp: this.model.get('sent_at')
                 });
+                this.loadedAttachments.push(view);
+
                 this.listenTo(view, 'update', function() {
-                    if (!view.el.parentNode) {
-                        this.trigger('beforeChangeHeight');
-                        this.$('.attachments').append(view.el);
-                        this.trigger('afterChangeHeight');
-                    }
+                    view.updated = true;
+                    this.appendAttachmentView(view);
                 });
+
                 view.render();
             }.bind(this));
         }

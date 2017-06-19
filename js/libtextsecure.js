@@ -37025,26 +37025,7 @@ Internal.SessionLock.queueJobForNumber = function queueJobForNumber(number, runJ
 
                 return textsecure.storage.groups.addNumbers(groupId, added);
             });
-        },
-
-        needUpdateByDeviceRegistrationId: function(groupId, number, encodedNumber, registrationId) {
-            return textsecure.storage.protocol.getGroup(groupId).then(function(group) {
-                if (group === undefined)
-                    throw new Error("Unknown group for device registration id");
-
-                if (group.numberRegistrationIds[number] === undefined)
-                    throw new Error("Unknown number in group for device registration id");
-
-                if (group.numberRegistrationIds[number][encodedNumber] == registrationId)
-                    return false;
-
-                var needUpdate = group.numberRegistrationIds[number][encodedNumber] !== undefined;
-                group.numberRegistrationIds[number][encodedNumber] = registrationId;
-                return textsecure.storage.protocol.putGroup(groupId, group).then(function() {
-                    return needUpdate;
-                });
-            });
-        },
+        }
     };
 })();
 
@@ -39055,6 +39036,9 @@ MessageSender.prototype = {
                 if (attachment.size) {
                     proto.size = attachment.size;
                 }
+                if (attachment.flags) {
+                    proto.flags = attachment.flags;
+                }
                 return proto;
             });
         }.bind(this));
@@ -39260,17 +39244,19 @@ MessageSender.prototype = {
         proto.body = "TERMINATE";
         proto.flags = textsecure.protobuf.DataMessage.Flags.END_SESSION;
         return this.sendIndividualProto(number, proto, timestamp).then(function(res) {
-            return textsecure.storage.protocol.getDeviceIds(number).then(function(deviceIds) {
-                return Promise.all(deviceIds.map(function(deviceId) {
-                    var address = new libsignal.SignalProtocolAddress(number, deviceId);
-                    console.log('closing session for', address.toString());
-                    var sessionCipher = new libsignal.SessionCipher(textsecure.storage.protocol, address);
-                    return sessionCipher.closeOpenSessionForDevice();
-                })).then(function() {
-                    return res;
+            return this.sendSyncMessage(proto.toArrayBuffer(), timestamp, number).then(function() {
+                return textsecure.storage.protocol.getDeviceIds(number).then(function(deviceIds) {
+                    return Promise.all(deviceIds.map(function(deviceId) {
+                        var address = new libsignal.SignalProtocolAddress(number, deviceId);
+                        console.log('closing session for', address.toString());
+                        var sessionCipher = new libsignal.SessionCipher(textsecure.storage.protocol, address);
+                        return sessionCipher.closeOpenSessionForDevice();
+                    })).then(function() {
+                        return res;
+                    });
                 });
             });
-        });
+        }.bind(this));
     },
 
     sendMessageToGroup: function(groupId, messageText, attachments, timestamp, expireTimer) {

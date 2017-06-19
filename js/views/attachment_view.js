@@ -9,10 +9,7 @@
       className: 'fileView',
       templateName: 'file-view',
       render_attributes: function() {
-        return {
-            fileName : this.model.fileName,
-            altText  : i18n('unsupportedAttachment')
-        };
+        return this.model;
       }
   });
 
@@ -65,12 +62,16 @@
 
   Whisper.AttachmentView = Backbone.View.extend({
     tagName: 'span',
-    className: 'attachment',
+    className: function() {
+      if (this.isImage()) {
+        return 'attachment';
+      } else {
+        return 'attachment bubbled';
+      }
+    },
     initialize: function(options) {
         this.blob = new Blob([this.model.data], {type: this.model.contentType});
 
-        var parts = this.model.contentType.split('/');
-        this.contentType = parts[0];
         if (options.timestamp) {
           this.timestamp = options.timestamp;
         }
@@ -85,20 +86,58 @@
         }
     },
     onclick: function(e) {
-        switch (this.contentType) {
-            case 'image':
-                var view = new Whisper.LightboxView({ model: this });
-                view.render();
-                view.$el.appendTo(this.el);
-                view.$el.trigger('show');
-                break;
+        if (this.isImage()) {
+            var view = new Whisper.LightboxView({ model: this });
+            view.render();
+            view.$el.appendTo(this.el);
+            view.$el.trigger('show');
 
-            default:
-                if (this.view instanceof MediaView) {
-                    return;
-                }
-                this.saveFile();
+        } else {
+            this.saveFile();
         }
+    },
+    isVoiceMessage: function() {
+        if (this.model.flags & textsecure.protobuf.AttachmentPointer.Flags.VOICE_MESSAGE) {
+          return true;
+        }
+
+        // Support for android legacy voice messages
+        if (this.isAudio() && this.model.fileName === null) {
+          return true;
+        }
+    },
+    isAudio: function() {
+        return this.model.contentType.startsWith('audio/');
+    },
+    isVideo: function() {
+        return this.model.contentType.startsWith('video/');
+    },
+    isImage: function() {
+        return this.model.contentType.startsWith('image/');
+    },
+    mediaType: function() {
+        if (this.isVoiceMessage()) {
+          return 'voice';
+        } else if (this.isAudio()) {
+          return 'audio';
+        } else if (this.isVideo()) {
+          return 'video';
+        } else if (this.isImage()) {
+          return 'image';
+        }
+    },
+    displayName: function() {
+        if (this.isVoiceMessage()) {
+            return i18n('voiceMessage');
+        }
+        if (this.model.fileName) {
+            return this.model.fileName;
+        }
+        if (this.isAudio() || this.isVideo()) {
+            return i18n('mediaMessage');
+        }
+
+        return i18n('unnamedFile');
     },
     suggestedName: function() {
         if (this.model.fileName) {
@@ -126,15 +165,21 @@
         a.remove();
     },
     render: function() {
+        if (!this.isImage()) {
+          this.renderFileView();
+        }
         var View;
-        switch(this.contentType) {
-            case 'image': View = ImageView; break;
-            case 'video': View = VideoView; break;
-            case 'audio': View = AudioView; break;
+        if (this.isImage()) {
+            View = ImageView;
+        } else if (this.isAudio()) {
+            View = AudioView;
+        } else if (this.isVideo()) {
+            View = VideoView;
         }
 
         if (!View || _.contains(UnsupportedFileTypes, this.model.contentType)) {
-            return this.renderFileView();
+            this.update();
+            return this;
         }
 
         if (!this.objectUrl) {
@@ -152,13 +197,20 @@
     onTimeout: function() {
         // Image or media element failed to load. Fall back to FileView.
         this.stopListening(this.view);
-        this.renderFileView();
+        this.update();
     },
     renderFileView: function() {
-        this.view = new FileView({model: {fileName: this.suggestedName()}});
-        this.view.$el.appendTo(this.$el.empty());
-        this.view.render();
-        this.update();
+        this.fileView = new FileView({
+          model: {
+            mediaType: this.mediaType(),
+            fileName: this.displayName(),
+            fileSize: window.filesize(this.model.size),
+            altText: i18n('clickToSave')
+          }
+        });
+
+        this.fileView.$el.appendTo(this.$el.empty());
+        this.fileView.render();
         return this;
     },
     update: function() {

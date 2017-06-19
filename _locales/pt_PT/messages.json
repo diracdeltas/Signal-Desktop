@@ -8,7 +8,7 @@
         "description": "Label for date and time of last sync operation"
     },
     "attemptingReconnection": {
-        "message": "Attempting reconnect in $reconnect_duration_in_seconds$ seconds",
+        "message": "Tentativa de ligação em $reconnect_duration_in_seconds$ segundos",
         "description": "",
         "placeholders": {
             "reconnect_duration_in_seconds": {
@@ -75,6 +75,10 @@
         "message": "Tipo de ficheiro não suportado",
         "description": "Displayed for outgoing unsupported attachment"
     },
+    "clickToSave": {
+        "message": "Clique para guardar",
+        "description": "Hover text for attachment filenames"
+    },
     "installGeneratingKeys": {
         "message": "A gerar chaves",
         "description": ""
@@ -84,7 +88,7 @@
         "description": "This is a menu item for resetting the session, using the imperative case, as in a command."
     },
     "offline": {
-        "message": "Offline",
+        "message": "Desligado",
         "description": ""
     },
     "welcomeToSignal": {
@@ -92,7 +96,7 @@
         "description": ""
     },
     "checkNetworkConnection": {
-        "message": "Check your network connection.",
+        "message": "Verifique a sua ligação de rede.",
         "description": "Obvious instructions for when a user's computer loses its network connection"
     },
     "notificationSettingsDialog": {
@@ -118,6 +122,10 @@
     "restartSignal": {
         "message": "Reiniciar",
         "description": "Menu item for restarting the program."
+    },
+    "youLeftTheGroup": {
+        "message": "Saiu do grupo",
+        "description": "Displayed when a user can't send a message because they have left the group"
     },
     "deleteMessages": {
         "message": "Apagar mensagens",
@@ -423,8 +431,12 @@
         "message": "Eu tenho o Signal para o Android.",
         "description": "Button for the user to confirm that they have Signal for Android"
     },
+    "unnamedFile": {
+        "message": "Unnamed File",
+        "description": "Hover text for attachment filenames"
+    },
     "connecting": {
-        "message": "Connecting",
+        "message": "A ligar",
         "description": ""
     },
     "sessionEnded": {
@@ -472,6 +484,10 @@
     "theirIdentityUnknown": {
         "message": "Ainda não trocou mensagens com este contacto. O seu número de segurança estará disponível a partir da primeira mensagem.",
         "description": ""
+    },
+    "voiceMessage": {
+        "message": "Mensagem de voz",
+        "description": "Name for a voice message attachment"
     },
     "submit": {
         "message": "Enviar",

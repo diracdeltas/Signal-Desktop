@@ -17,6 +17,10 @@
 
     // start a background worker for ecc
     textsecure.startWorker('/js/libsignal-protocol-worker.js');
+    Whisper.KeyChangeListener.init(textsecure.storage.protocol);
+    textsecure.storage.protocol.on('removePreKey', function() {
+        getAccountManager().refreshPreKeys();
+    });
 
     var SERVER_URL = isDevelopment
         ? 'https://textsecure-service-staging.whispersystems.org'
@@ -328,5 +332,10 @@
         }
     });
 
+    chrome.commands.onCommand.addListener(function(command) {
+        if (command === 'show_signal') {
+            openInbox();
+        }
+    });
 
 })();

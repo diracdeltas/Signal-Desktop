@@ -76,14 +76,15 @@ message DataMessage {
 
 message SyncMessage {
   message Sent {
-    optional string  destination = 1;
-    optional uint64  timestamp   = 2;
-    optional DataMessage message = 3;
-    optional uint64  expirationStartTimestamp = 4;
+    optional string      destination              = 1;
+    optional uint64      timestamp                = 2;
+    optional DataMessage message                  = 3;
+    optional uint64      expirationStartTimestamp = 4;
   }
 
   message Contacts {
     optional AttachmentPointer blob = 1;
+    optional bool              isComplete = 2 [default = false];
   }
 
   message Groups {
@@ -96,27 +97,47 @@ message SyncMessage {
 
   message Request {
     enum Type {
-      UNKNOWN     = 0;
-      CONTACTS    = 1;
-      GROUPS      = 2;
-      BLOCKED     = 3;
+      UNKNOWN  = 0;
+      CONTACTS = 1;
+      GROUPS   = 2;
+      BLOCKED  = 3;
     }
+
     optional Type type = 1;
   }
+
   message Read {
     optional string sender    = 1;
     optional uint64 timestamp = 2;
   }
 
-  optional Sent     sent     = 1;
-  optional Contacts contacts = 2;
-  optional Groups   groups   = 3;
-  optional Request  request  = 4;
-  repeated Read     read     = 5;
-  optional Blocked  blocked  = 6;
+  message Verification {
+    enum State {
+      DEFAULT            = 0;
+      VERIFIED           = 1;
+      NO_LONGER_VERIFIED = 2;
+    }
+
+    optional State  state       = 1;
+    // The e164 phone number of the user.
+    optional string destination = 2;
+    optional bytes  identityKey = 3;
+  }
+
+  optional Sent     sent             = 1;
+  optional Contacts contacts         = 2;
+  optional Groups   groups           = 3;
+  optional Request  request          = 4;
+  repeated Read     read             = 5;
+  optional Blocked  blocked          = 6;
+  repeated Verification verification = 7;
 }
 
 message AttachmentPointer {
+  enum Flags {
+    VOICE_MESSAGE = 1;
+  }
+
   optional fixed64 id          = 1;
   optional string  contentType = 2;
   optional bytes   key         = 3;
@@ -124,14 +145,16 @@ message AttachmentPointer {
   optional bytes   thumbnail   = 5;
   optional bytes   digest      = 6;
   optional string  fileName    = 7;
+  optional uint32  flags       = 8;
 }
 
 message GroupContext {
   enum Type {
-    UNKNOWN = 0;
-    UPDATE  = 1;
-    DELIVER = 2;
-    QUIT    = 3;
+    UNKNOWN      = 0;
+    UPDATE       = 1;
+    DELIVER      = 2;
+    QUIT         = 3;
+    REQUEST_INFO = 4;
   }
   optional bytes             id      = 1;
   optional Type              type    = 2;
@@ -140,22 +163,27 @@ message GroupContext {
   optional AttachmentPointer avatar  = 5;
 }
 
-message Avatar {
-  optional string contentType = 1;
-  optional uint32 length      = 2;
+message ContactDetails {
+  message Avatar {
+    optional string contentType = 1;
+    optional uint32 length      = 2;
+  }
+
+  optional string number  = 1;
+  optional string name    = 2;
+  optional Avatar avatar  = 3;
+  optional string color   = 4;
 }
 
 message GroupDetails {
-  optional bytes  id      = 1;
-  optional string name    = 2;
-  repeated string members = 3;
-  optional Avatar avatar  = 4;
-  optional bool   active  = 5 [default = true];
-}
+  message Avatar {
+    optional string contentType = 1;
+    optional uint32 length      = 2;
+  }
 
-message ContactDetails {
-  optional string number = 1;
-  optional string name   = 2;
-  optional Avatar avatar = 3;
-  optional string color  = 4;
+  optional bytes  id       = 1;
+  optional string name     = 2;
+  repeated string members  = 3;
+  optional Avatar avatar   = 4;
+  optional bool   active   = 5 [default = true];
 }

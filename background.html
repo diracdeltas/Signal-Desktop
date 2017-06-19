@@ -42,6 +42,18 @@
       </div>
     </div>
   </script>
+  <script type='text/x-tmpl-mustache' id='scroll-down-button-view'>
+    <button class='text {{ cssClass }}' alt='{{ moreBelow }}'>
+      <div class='icon'></div>
+    </button>
+  </script>
+  <script type='text/x-tmpl-mustache' id='last-seen-indicator-view'>
+    <div class='bar'>
+      <div class='text'>
+        {{ unreadMessages }}
+      </div>
+    </div>
+  </script>
   <script type='text/x-tmpl-mustache' id='expired_alert'>
     <a target='_blank' href='https://chrome.google.com/webstore/detail/bikioccmkafdpakkkcpdbppfkghcmihk'>
       <button class='upgrade'>{{ upgrade }}</button>
@@ -116,9 +128,11 @@
                 </div>
                 <textarea class='send-message' placeholder='{{ send-message }}' rows='1' dir='auto'></textarea>
                 <div class='capture-audio'>
-                    <!--<button class='microphone'></button>-->
+                    <button class='microphone'></button>
                 </div>
-
+                <div class='android-length-warning'>
+                    {{ android-length-warning }}
+                </div>
               </div>
           </form>
       </div>
@@ -152,8 +166,13 @@
         <a class='x close' alt='remove attachment' href='#'></a>
   </script>
   <script type='text/x-tmpl-mustache' id='file-view'>
-    <span class='icon'></span>
-    <span class='fileName' alt='{{ fileName }}' title='{{ altText }}'>{{ fileName }}</a>
+    <div class='icon {{ mediaType }}'></div>
+    <div class='text'>
+      <div class='fileName' title='{{ altText }}'>
+        {{ fileName }}
+      </div>
+      <div class='fileSize'>{{ fileSize }}</div>
+    </div>
   </script>
   <script type='text/x-tmpl-mustache' id='hasRetry'>
     {{ messageNotSent }}
@@ -625,6 +644,8 @@
   <script type='text/javascript' src='js/emoji_util.js'></script>
 
   <script type='text/javascript' src='js/views/whisper_view.js'></script>
+  <script type='text/javascript' src='js/views/last_seen_indicator_view.js'></script>
+  <script type='text/javascript' src='js/views/scroll_down_button_view.js'></script>
   <script type='text/javascript' src='js/views/debug_log_view.js'></script>
   <script type='text/javascript' src='js/views/toast_view.js'></script>
   <script type='text/javascript' src='js/views/attachment_preview_view.js'></script>
@@ -656,6 +677,7 @@
 
   <script type='text/javascript' src='js/wall_clock_listener.js'></script>
   <script type='text/javascript' src='js/rotate_signed_prekey_listener.js'></script>
+  <script type='text/javascript' src='js/keychange_listener.js'></script>
   <script type='text/javascript' src='js/background.js'></script>
 </head>
 <body>

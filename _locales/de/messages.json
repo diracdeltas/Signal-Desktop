@@ -1,4 +1,8 @@
 {
+    "scrollDown": {
+        "message": "Zum Ende der Unterhaltung scrollen",
+        "description": "Alt text for button to take user down to bottom of conversation, shown when user scrolls up"
+    },
     "timerOption_10_seconds": {
         "message": "10 Sekunden",
         "description": "Label for a selectable option in the message expiration timer menu"
@@ -75,6 +79,14 @@
         "message": "Nicht unterstützter Dateityp",
         "description": "Displayed for outgoing unsupported attachment"
     },
+    "clickToSave": {
+        "message": "Zum Speichern anklicken",
+        "description": "Hover text for attachment filenames"
+    },
+    "messagesBelow": {
+        "message": "Neue Nachrichten unten",
+        "description": "Alt text for button to take user down to bottom of conversation with more than one message out of screen"
+    },
     "installGeneratingKeys": {
         "message": "Schlüssel werden erzeugt …",
         "description": ""
@@ -85,7 +97,7 @@
     },
     "offline": {
         "message": "Nicht verbunden",
-        "description": ""
+        "description": "Displayed when the desktop client has no network connection."
     },
     "welcomeToSignal": {
         "message": "Willkommen bei Signal",
@@ -119,8 +131,12 @@
         "message": "Signal neu starten",
         "description": "Menu item for restarting the program."
     },
+    "youLeftTheGroup": {
+        "message": "Du hast die Gruppe verlassen",
+        "description": "Displayed when a user can't send a message because they have left the group"
+    },
     "deleteMessages": {
-        "message": "Nachrichten löschen",
+        "message": "Unterhaltung löschen",
         "description": "Menu item for deleting messages, title case."
     },
     "incomingError": {
@@ -243,6 +259,16 @@
         "message": "Zustimmung für Sicherheitsnummern",
         "description": "Header for safety numbers setting"
     },
+    "unreadMessages": {
+        "message": "$count$ ungelesene Nachrichten",
+        "description": "Text for unread message separator, with count",
+        "placeholders": {
+            "count": {
+                "content": "$1",
+                "example": "5"
+            }
+        }
+    },
     "installTooManyDevices": {
         "message": "Es sind bereits zu viele Geräte verknüpft. Versuche, einige zu entfernen.",
         "description": ""
@@ -282,7 +308,7 @@
         "description": "Label text for button to upgrade the app to the latest version"
     },
     "yourSafetyNumberWith": {
-        "message": "Deine Sicherheitsnummer mit $name$",
+        "message": "Deine Sicherheitsnummer mit $name$:",
         "description": "Heading for safety number view",
         "placeholders": {
             "name": {
@@ -313,7 +339,7 @@
     },
     "disconnected": {
         "message": "Nicht verbunden",
-        "description": ""
+        "description": "Displayed when the desktop client cannot connect to the server."
     },
     "syncing": {
         "message": "Import wird durchgeführt …",
@@ -371,6 +397,10 @@
         "message": "Nachricht mit Medieninhalten",
         "description": "Description of a message that has an attachment and no text, displayed in the conversation list as a preview."
     },
+    "unreadMessage": {
+        "message": "1 ungelesene Nachricht",
+        "description": "Text for unread message separator, just one message"
+    },
     "expiredWarning": {
         "message": "Diese Version von Signal Desktop ist veraltet. Bitte führe eine Aktualisierung auf die aktuellste Version durch, um weiterhin Nachrichten austauschen zu können.",
         "description": "Warning notification that this version of the app has expired"
@@ -399,6 +429,10 @@
         "message": "Willkommen bei Signal Desktop",
         "description": "Welcome title on the install page"
     },
+    "messageBelow": {
+        "message": "Neue Nachricht unten",
+        "description": "Alt text for button to take user down to bottom of conversation with a new message out of screen"
+    },
     "installConnectionFailed": {
         "message": "Verbindung zum Server gescheitert.",
         "description": "Displayed when we can't connect to the server."
@@ -423,9 +457,13 @@
         "message": "Ich habe Signal für Android",
         "description": "Button for the user to confirm that they have Signal for Android"
     },
+    "unnamedFile": {
+        "message": "Unbenannte Datei",
+        "description": "Hover text for attachment filenames"
+    },
     "connecting": {
         "message": "Verbindung wird hergestellt …",
-        "description": ""
+        "description": "Displayed when the desktop client is currently connecting to the server."
     },
     "sessionEnded": {
         "message": "Verschlüsselung neu gestartet",
@@ -473,12 +511,16 @@
         "message": "Du hast bisher noch keine Nachrichten mit diesem Kontakt ausgetauscht. Eure gemeinsame Sicherheitsnummer wird nach der ersten Nachricht verfügbar sein.",
         "description": ""
     },
+    "voiceMessage": {
+        "message": "Sprachnachricht",
+        "description": "Name for a voice message attachment"
+    },
     "submit": {
         "message": "Übermitteln",
         "description": ""
     },
     "keychanged": {
-        "message": "Deine Sicherheitsnummer mit $name$ hat sich geändert",
+        "message": "Deine Sicherheitsnummer mit $name$ hat sich geändert. Zum Überprüfen anklicken.",
         "description": "",
         "placeholders": {
             "name": {

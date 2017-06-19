@@ -2,6 +2,7 @@ $grey-dark: #333333;
 $grey-dark_l2: darken($grey-dark, 4%);
 $grey-dark_l3: darken($grey-dark_l2, 7%);
 $grey-dark_l4: darken($grey-dark_l3, 8%);
+$button-dark: #ccc;
 $text-dark: #CCCCCC;
 
 .android-dark {
@@ -20,6 +21,13 @@ $text-dark: #CCCCCC;
     &.inactive {
       background-color: $grey-dark;
       color: $text-dark;
+    }
+  }
+  button, .confirmation-dialog .content .buttons button {
+    background-color: $button-dark;
+    border: 1px solid $grey-dark_l2;
+    &:hover {
+      background-color: darken($button-dark, 8%);
     }
   }
   .message-detail, .message-container, .conversation,
@@ -112,10 +120,6 @@ $text-dark: #CCCCCC;
     background-color: $grey-dark_l3;
     border-color: $grey-dark_l2;
     @include invert-text-color;
-    &::-webkit-search-cancel-button {
-      background: url('/images/x_white.svg') no-repeat center;
-      background-size: cover;
-    }
     &.active.ltr, &.active.rtl {
       background-image: url('/images/x_white.svg');
     }
@@ -139,15 +143,46 @@ $text-dark: #CCCCCC;
   }
 
   .incoming .bubble {
-    .sender, .content, .body, .meta, a {
+    .sender, .content, .body, .meta, a, .fileView {
       @include invert-text-color;
     }
-    .attachments, .content {
+    .content {
       a {
         color: $grey_l;
       }
     }
   }
+
+  .incoming .bubble .fileView .icon{
+    &::before {
+      @include color-svg('/images/file.svg', white);
+    }
+    &.audio:before {
+      @include color-svg('/images/audio.svg', white);
+    }
+    &.video:before {
+      @include color-svg('/images/video.svg', white);
+    }
+    &.voice:before {
+      @include color-svg('/images/voice.svg', white);
+    }
+  }
+
+  .outgoing .bubble .fileView .icon {
+    &::before {
+      @include color-svg('/images/file.svg', #CCCCCC);
+    }
+    &.audio:before {
+      @include color-svg('/images/audio.svg', #CCCCCC);
+    }
+    &.video:before {
+      @include color-svg('/images/video.svg', #CCCCCC);
+    }
+    &.voice:before {
+      @include color-svg('/images/voice.svg', #CCCCCC);
+    }
+  }
+
   button.clock {
     @include header-icon-white('/images/clock.svg');
   }
@@ -166,6 +201,45 @@ $text-dark: #CCCCCC;
     }
   }
   ::-webkit-scrollbar-track {
-    background-color: $grey-dark_l2;
+    background-color: transparent;
+  }
+  .recorder {
+    background: $grey-dark_l2;
+  }
+
+  .message-list .last-seen-indicator-view {
+    .bar {
+      border-top: 1px solid rgba(255, 255, 255, .0625);
+      border-bottom: 1px solid rgba(0, 0, 0, 0.15);
+
+      background-color: rgba(255, 255, 255, 0.1);
+    }
+
+    .text {
+      background-color: $grey-dark_l3;
+    }
+  }
+
+  .discussion-container .scroll-down-button-view {
+    button {
+      background-color: $grey_l4;
+
+      .icon {
+        @include color-svg('/images/down.svg', black);
+      }
+      .icon:hover {
+	      background-color: white;
+      }
+
+      &.new-messages  {
+        background-color: $blue;
+        .icon {
+          @include color-svg('/images/down.svg', white);
+        }
+      	&:hover {
+      	  background-color: #1472bd;
+      	}
+      }
+    }
   }
 }

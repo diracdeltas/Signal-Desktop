@@ -15,12 +15,18 @@
             return { toastMessage: i18n('unblockToSend') };
         }
     });
+    Whisper.LeftGroupToast = Whisper.ToastView.extend({
+        render_attributes: function() {
+            return { toastMessage: i18n('youLeftTheGroup') };
+        }
+    });
 
     var MenuView = Whisper.View.extend({
         toggleMenu: function() {
             this.$('.menu-list').toggle();
         }
     });
+
     var TimerMenuView = MenuView.extend({
         initialize: function() {
             this.render();
@@ -72,6 +78,7 @@
                 'destroy'         : i18n('deleteMessages'),
                 'send-message'    : i18n('sendMessage'),
                 'disappearing-messages': i18n('disappearingMessages'),
+                'android-length-warning': i18n('androidMessageLengthWarning'),
                 timer_options     : Whisper.ExpirationTimerOptions.models
             };
         },
@@ -146,10 +153,15 @@
             'click .back': 'resetPanel',
             'click .microphone': 'captureAudio',
             'click .disappearing-messages': 'enableDisappearingMessages',
+            'click .scroll-down-button-view': 'scrollToBottom',
             'focus .send-message': 'focusBottomBar',
             'change .file-input': 'toggleMicrophone',
             'blur .send-message': 'unfocusBottomBar',
-            'loadMore .message-list': 'fetchMessages',
+            'loadMore .message-list': 'loadMoreMessages',
+            'newOffscreenMessage .message-list': 'addScrollDownButtonWithCount',
+            'atBottom .message-list': 'removeScrollDownButton',
+            'farFromBottom .message-list': 'addScrollDownButton',
+            'lazyScroll .message-list': 'onLazyScroll',
             'close .menu': 'closeMenu',
             'select .message-list .entry': 'messageDetail',
             'force-resize': 'forceUpdateMessageFieldSize',
@@ -169,6 +181,13 @@
                 this.$('.capture-audio').show();
             }
         },
+        toggleLengthWarning: function() {
+            if (this.$('.send-message').val().length > 2000) {
+                this.$('.android-length-warning').show();
+            } else {
+                this.$('.android-length-warning').hide();
+            }
+        },
         captureAudio: function(e) {
             e.preventDefault();
             var view = new Whisper.RecorderView().render();
@@ -180,6 +199,7 @@
         },
         handleAudioCapture: function(blob) {
             this.fileInput.file = blob;
+            this.fileInput.isVoiceNote = true;
             this.fileInput.previewImages();
             this.$('.bottom-bar form').submit();
         },
@@ -195,29 +215,156 @@
             this.$('.bottom-bar form').addClass('active');
         },
 
+        onLazyScroll: function() {
+            // The in-progress fetch check is important, because while that happens, lots
+            //   of messages are added to the DOM, one by one, changing window size and
+            //   generating scroll events.
+            if (!this.isHidden() && window.isFocused() && !this.inProgressFetch) {
+                this.markRead();
+            }
+        },
+        updateUnread: function() {
+            this.resetLastSeenIndicator();
+            // Waiting for scrolling caused by resetLastSeenIndicator to settle down
+            setTimeout(this.markRead.bind(this), 1);
+        },
+
         onOpened: function() {
             this.view.resetScrollPosition();
             this.$el.trigger('force-resize');
             this.focusMessageField();
-            this.model.markRead();
+
+            if (this.inProgressFetch) {
+                this.inProgressFetch.then(this.updateUnread.bind(this));
+            } else {
+                this.updateUnread();
+            }
+        },
+
+        addScrollDownButtonWithCount: function() {
+            this.updateScrollDownButton(1);
+        },
+
+        addScrollDownButton: function() {
+            if (!this.scrollDownButton) {
+                this.updateScrollDownButton();
+            }
+        },
+
+        updateScrollDownButton: function(count) {
+            if (this.scrollDownButton) {
+                this.scrollDownButton.increment(count);
+            } else {
+                this.scrollDownButton = new Whisper.ScrollDownButtonView({count: count});
+                this.scrollDownButton.render();
+                var container = this.$('.discussion-container');
+                container.append(this.scrollDownButton.el);
+            }
+        },
+
+        removeScrollDownButton: function() {
+            if (this.scrollDownButton) {
+                this.scrollDownButton.remove();
+                this.scrollDownButton = null;
+            }
+        },
+
+        removeLastSeenIndicator: function() {
+            if (this.lastSeenIndicator) {
+                this.lastSeenIndicator.remove();
+                this.lastSeenIndicator = null;
+            }
+        },
+
+        scrollToBottom: function() {
+            // If we're above the last seen indicator, we should scroll there instead
+            // Note: if we don't end up at the bottom of the conversation, button will not go away!
+            if (this.lastSeenIndicator) {
+                var location = this.lastSeenIndicator.$el.position().top;
+                if (location > 0) {
+                    this.lastSeenIndicator.el.scrollIntoView();
+                    return;
+                } else {
+                    this.removeLastSeenIndicator();
+                }
+            }
+            this.view.scrollToBottom();
+        },
+
+        resetLastSeenIndicator: function(options) {
+            options = options || {};
+            _.defaults(options, {scroll: true});
+
+            var oldestUnread = this.model.messageCollection.find(function(model) {
+                return model.get('unread');
+            });
+            var unreadCount = this.model.get('unreadCount');
+
+            this.removeLastSeenIndicator();
+
+            if (oldestUnread && unreadCount > 0) {
+                this.lastSeenIndicator = new Whisper.LastSeenIndicatorView({count: unreadCount});
+                var lastSeenEl = this.lastSeenIndicator.render().$el;
+
+                lastSeenEl.insertBefore(this.$('#' + oldestUnread.get('id')));
+
+                if (this.view.atBottom() || options.scroll) {
+                    lastSeenEl[0].scrollIntoView();
+                }
+
+                // scrollIntoView is an async operation, but we have no way to listen for
+                // completion of the resultant scroll.
+                setTimeout(function() {
+                    if (!this.view.atBottom()) {
+                        this.addScrollDownButtonWithCount(unreadCount);
+                    }
+                }.bind(this), 1);
+            }
         },
 
         focusMessageField: function() {
             this.$messageField.focus();
         },
 
+        loadMoreMessages: function() {
+            if (this.inProgressFetch) {
+                return;
+            }
+
+            this.view.measureScrollPosition();
+            var startingHeight = this.view.scrollHeight;
+
+            this.fetchMessages().then(function() {
+                // We delay this work to let scrolling/layout settle down first
+                setTimeout(function() {
+                    this.view.measureScrollPosition();
+                    var endingHeight = this.view.scrollHeight;
+                    var delta = endingHeight - startingHeight;
+
+                    var newScrollPosition = this.view.scrollPosition + delta - this.view.outerHeight;
+                    this.view.$el.scrollTop(newScrollPosition);
+                }.bind(this), 1);
+            }.bind(this));
+        },
+
         fetchMessages: function() {
             console.log('fetchMessages');
             this.$('.bar-container').show();
-            return this.model.fetchContacts().then(function() {
+            if (this.inProgressFetch) {
+              console.log('Multiple fetchMessage calls!');
+            }
+            this.inProgressFetch = this.model.fetchContacts().then(function() {
                 return this.model.fetchMessages().then(function() {
                     this.$('.bar-container').hide();
                     this.model.messageCollection.where({unread: 1}).forEach(function(m) {
                         m.fetch();
                     });
+                    this.inProgressFetch = null;
                 }.bind(this));
             }.bind(this));
             // TODO catch?
+
+            return this.inProgressFetch;
         },
 
         onExpired: function(message) {
@@ -235,8 +382,32 @@
             this.model.messageCollection.add(message, {merge: true});
             message.setToExpire();
 
-            if (!this.isHidden() && window.isFocused()) {
+            if (this.lastSeenIndicator) {
+                this.lastSeenIndicator.increment(1);
+            }
+
+            if (!this.isHidden() && !window.isFocused()) {
+                // The conversation is visible, but window is not focused
+                if (!this.lastSeenIndicator) {
+                    this.resetLastSeenIndicator({scroll: false});
+                } else if (this.view.atBottom() && this.model.get('unreadCount') === this.lastSeenIndicator.getCount()) {
+                    // The count check ensures that the last seen indicator is still in
+                    //   sync with the real number of unread, so we can scroll to it.
+                    //   We only do this if we're at the bottom, because that signals that
+                    //   the user is okay with us changing scroll around so they see the
+                    //   right unseen message first.
+                    this.resetLastSeenIndicator({scroll: true});
+                }
+            }
+            else if (!this.isHidden() && window.isFocused()) {
+                // The conversation is visible and in focus
                 this.markRead();
+
+                // When we're scrolled up and we don't already have a last seen indicator
+                //   we add a new one.
+                if (!this.view.atBottom() && !this.lastSeenIndicator) {
+                    this.resetLastSeenIndicator({scroll: false});
+                }
             }
         },
         updateMessage: function(message) {
@@ -256,11 +427,68 @@
 
         onClick: function(e) {
             this.closeMenu(e);
-            this.markRead(e);
+            this.markRead();
         },
 
-        markRead: function(e) {
-            this.model.markRead();
+        findNewestVisibleUnread: function() {
+            var collection = this.model.messageCollection;
+            var length = collection.length;
+            var viewportBottom = this.view.outerHeight;
+            var unreadCount = this.model.get('unreadCount');
+
+            if (!unreadCount || unreadCount < 1) {
+                return;
+            }
+
+            // Start with the most recent message, search backwards in time
+            var foundUnread = 0;
+            for (var i = length - 1; i >= 0; i -= 1) {
+                // We don't want to search through all messages, so we stop after we've
+                //   hit all unread messages. The unread should be relatively recent.
+                if (foundUnread >= unreadCount) {
+                    return;
+                }
+
+                var message = collection.at(i);
+                if (!message.get('unread')) {
+                    continue;
+                }
+
+                foundUnread += 1;
+
+                var el = this.$('#' + message.id);
+                var position = el.position();
+                var top = position.top;
+
+                // We're fully below the viewport, continue searching up.
+                if (top > viewportBottom) {
+                    continue;
+                }
+
+                // If the bottom fits on screen, we'll call it visible. Even if the
+                //   message is really tall.
+                var height = el.height();
+                var bottom = top + height;
+                if (bottom <= viewportBottom) {
+                    return message;
+                }
+
+                // Continue searching up.
+            }
+        },
+
+        markRead: function() {
+            var unread;
+
+            if (this.view.atBottom()) {
+                unread = this.model.messageCollection.last();
+            } else {
+                unread = this.findNewestVisibleUnread();
+            }
+
+            if (unread) {
+                this.model.markRead(unread.get('received_at'));
+            }
         },
 
         verifyIdentity: function(ev, model) {
@@ -339,15 +567,20 @@
         },
 
         sendMessage: function(e) {
+            this.removeLastSeenIndicator();
+
             var toast;
             if (extension.expired()) {
                 toast = new Whisper.ExpiredToast();
-                toast.$el.insertAfter(this.$el);
-                toast.render();
-                return;
             }
             if (this.model.isPrivate() && storage.isBlocked(this.model.id)) {
                 toast = new Whisper.BlockedToast();
+            }
+            if (!this.model.isPrivate() && this.model.get('left')) {
+                toast = new Whisper.LeftGroupToast();
+            }
+
+            if (toast) {
                 toast.$el.insertAfter(this.$el);
                 toast.render();
                 return;
@@ -405,6 +638,7 @@
                 return this.$('.bottom-bar form').submit();
             }
             this.toggleMicrophone();
+            this.toggleLengthWarning();
 
             this.view.measureScrollPosition();
             window.autosize(this.$messageField);
