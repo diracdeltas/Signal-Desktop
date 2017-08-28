@@ -146,7 +146,8 @@
             }.bind(this));
         },
         queueTask: function(task) {
-            return this.pending = this.pending.then(task, task);
+            var taskWithTimeout = textsecure.createTaskWithTimeout(task);
+            return this.pending = this.pending.then(taskWithTimeout, taskWithTimeout);
         },
         cleanSignedPreKeys: function() {
             var nextSignedKeyId = textsecure.storage.get('signedKeyId');
@@ -203,10 +204,14 @@
 
                     // update our own identity key, which may have changed
                     // if we're relinking after a reinstall on the master device
-                    var putIdentity = textsecure.storage.protocol.saveIdentity.bind(
-                        null, number, identityKeyPair.pubKey
-                    );
-                    textsecure.storage.protocol.removeIdentityKey(number).then(putIdentity, putIdentity);
+                    textsecure.storage.protocol.saveIdentityWithAttributes(number, {
+                        id                  : number,
+                        publicKey           : identityKeyPair.pubKey,
+                        firstUse            : true,
+                        timestamp           : Date.now(),
+                        verified            : textsecure.storage.protocol.VerifiedStatus.VERIFIED,
+                        nonblockingApproval : true
+                    });
 
                     textsecure.storage.put('identityKey', identityKeyPair);
                     textsecure.storage.put('signaling_key', signalingKey);

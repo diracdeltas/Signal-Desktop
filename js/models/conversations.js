@@ -7,7 +7,7 @@
 
    // TODO: Factor out private and group subclasses of Conversation
 
-   var COLORS = [
+    var COLORS = [
         'red',
         'pink',
         'purple',
@@ -25,11 +25,30 @@
         'blue_grey',
     ];
 
+    function constantTimeEqualArrayBuffers(ab1, ab2) {
+        if (!(ab1 instanceof ArrayBuffer && ab2 instanceof ArrayBuffer)) {
+            return false;
+        }
+        if (ab1.byteLength !== ab2.byteLength) {
+            return false;
+        }
+        var result = true;
+        var ta1 = new Uint8Array(ab1);
+        var ta2 = new Uint8Array(ab2);
+        for (var i = 0; i < ab1.byteLength; ++i) {
+            if (ta1[i] !== ta2[i]) { result = false; }
+        }
+        return result;
+    }
+
   Whisper.Conversation = Backbone.Model.extend({
     database: Whisper.Database,
     storeName: 'conversations',
     defaults: function() {
-      return { unreadCount : 0 };
+        return {
+            unreadCount: 0,
+            verified: textsecure.storage.protocol.VerifiedStatus.DEFAULT
+        };
     },
 
     handleMessageError: function(message, errors) {
@@ -37,28 +56,404 @@
     },
 
     initialize: function() {
+        this.ourNumber = textsecure.storage.user.getNumber();
+        this.verifiedEnum = textsecure.storage.protocol.VerifiedStatus;
+
         this.contactCollection = new Backbone.Collection();
         this.messageCollection = new Whisper.MessageCollection([], {
             conversation: this
         });
 
         this.messageCollection.on('change:errors', this.handleMessageError, this);
+        this.messageCollection.on('send-error', this.onMessageError, this);
 
         this.on('change:avatar', this.updateAvatarUrl);
         this.on('destroy', this.revokeAvatarUrl);
     },
 
+    isMe: function() {
+        return this.id === this.ourNumber;
+    },
+
+    onMessageError: function() {
+        this.updateVerified();
+    },
+    safeGetVerified: function() {
+        return textsecure.storage.protocol.getVerified(this.id).catch(function() {
+            return textsecure.storage.protocol.VerifiedStatus.DEFAULT;
+        });
+    },
+    updateVerified: function() {
+        if (this.isPrivate()) {
+            return Promise.all([
+                this.safeGetVerified(),
+                this.safeFetch()
+            ]).then(function(results) {
+                var trust = results[0];
+                // we don't return here because we don't need to wait for this to finish
+                this.save({verified: trust});
+            }.bind(this));
+        } else {
+            return this.fetchContacts().then(function() {
+                return Promise.all(this.contactCollection.map(function(contact) {
+                    if (!contact.isMe()) {
+                        return contact.updateVerified();
+                    }
+                }.bind(this)));
+            }.bind(this)).then(this.onMemberVerifiedChange.bind(this));
+        }
+    },
+    safeFetch: function() {
+        // new Promise necessary because a fetch will fail if convo not in db yet
+        return new Promise(function(resolve) {
+            this.fetch().always(resolve);
+        }.bind(this));
+    },
+    setVerifiedDefault: function(options) {
+        var DEFAULT = this.verifiedEnum.DEFAULT;
+        return this.queueJob(function() {
+            return this._setVerified(DEFAULT, options);
+        }.bind(this));
+    },
+    setVerified: function(options) {
+        var VERIFIED = this.verifiedEnum.VERIFIED;
+        return this.queueJob(function() {
+            return this._setVerified(VERIFIED, options);
+        }.bind(this));
+    },
+    setUnverified: function(options) {
+        var UNVERIFIED = this.verifiedEnum.UNVERIFIED;
+        return this.queueJob(function() {
+            return this._setVerified(UNVERIFIED, options);
+        }.bind(this));
+    },
+    _setVerified: function(verified, options) {
+        options = options || {};
+        _.defaults(options, {viaSyncMessage: false, viaContactSync: false, key: null});
+
+        var DEFAULT = this.verifiedEnum.DEFAULT;
+        var VERIFIED = this.verifiedEnum.VERIFIED;
+        var UNVERIFIED = this.verifiedEnum.UNVERIFIED;
+
+        if (!this.isPrivate()) {
+            throw new Error('You cannot verify a group conversation. ' +
+                            'You must verify individual contacts.');
+        }
+
+        var beginningVerified = this.get('verified');
+        var promise;
+        if (options.viaSyncMessage) {
+            // handle the incoming key from the sync messages - need different
+            // behavior if that key doesn't match the current key
+            promise = textsecure.storage.protocol.processVerifiedMessage(
+                this.id, verified, options.key
+            );
+        } else {
+            promise = textsecure.storage.protocol.setVerified(
+                this.id, verified
+            );
+        }
+
+        var keychange;
+        return promise.then(function(updatedKey) {
+            keychange = updatedKey;
+            return new Promise(function(resolve) {
+                return this.save({verified: verified}).always(resolve);
+            }.bind(this));
+        }.bind(this)).then(function() {
+            // Three situations result in a verification notice in the conversation:
+            //   1) The message came from an explicit verification in another client (not
+            //      a contact sync)
+            //   2) The verification value received by the contact sync is different
+            //      from what we have on record (and it's not a transition to UNVERIFIED)
+            //   3) Our local verification status is VERIFIED and it hasn't changed,
+            //      but the key did change (Key1/VERIFIED to Key2/VERIFIED - but we don't
+            //      want to show DEFAULT->DEFAULT or UNVERIFIED->UNVERIFIED)
+            if (!options.viaContactSync
+                || (beginningVerified !== verified && verified !== UNVERIFIED)
+                || (keychange && verified === VERIFIED)) {
+
+                this.addVerifiedChange(this.id, verified === VERIFIED, {local: !options.viaSyncMessage});
+            }
+            if (!options.viaSyncMessage) {
+                return this.sendVerifySyncMessage(this.id, verified);
+            }
+        }.bind(this));
+    },
+    sendVerifySyncMessage: function(number, state) {
+        return textsecure.storage.protocol.loadIdentityKey(number).then(function(key) {
+            return textsecure.messaging.syncVerification(number, state, key);
+        });
+    },
+    getIdentityKeys: function() {
+        var lookup = {};
+
+        if (this.isPrivate()) {
+            return textsecure.storage.protocol.loadIdentityKey(this.id).then(function(key) {
+                lookup[this.id] = key;
+                return lookup;
+            }.bind(this)).catch(function(error) {
+                console.log(
+                    'getIdentityKeys error for conversation',
+                    this.id,
+                    error && error.stack ? error.stack : error
+                );
+                return lookup;
+            }.bind(this));
+        } else {
+            return Promise.all(this.contactCollection.map(function(contact) {
+                return textsecure.storage.protocol.loadIdentityKey(contact.id).then(function(key) {
+                    lookup[contact.id] = key;
+                }).catch(function(error) {
+                    console.log(
+                        'getIdentityKeys error for group member',
+                        contact.id,
+                        error && error.stack ? error.stack : error
+                    );
+                });
+            })).then(function() {
+                return lookup;
+            });
+        }
+    },
+    replay: function(error, message) {
+        var replayable = new textsecure.ReplayableError(error);
+        return replayable.replay(message.attributes).catch(function(error) {
+            console.log(
+                'replay error:',
+                error && error.stack ? error.stack : error
+            );
+        });
+    },
+    decryptOldIncomingKeyErrors: function() {
+        // We want to run just once per conversation
+        if (this.get('decryptedOldIncomingKeyErrors')) {
+            return Promise.resolve();
+        }
+        console.log('decryptOldIncomingKeyErrors start for', this.id);
+
+        var messages = this.messageCollection.filter(function(message) {
+            var errors = message.get('errors');
+            if (!errors || !errors[0]) {
+                return false;
+            }
+            var error = _.find(errors, function(error) {
+                return error.name === 'IncomingIdentityKeyError';
+            });
+
+            return Boolean(error);
+        });
+
+        var markComplete = function() {
+            console.log('decryptOldIncomingKeyErrors complete for', this.id);
+            return new Promise(function(resolve) {
+                this.save({decryptedOldIncomingKeyErrors: true}).always(resolve);
+            }.bind(this));
+        }.bind(this);
+
+        if (!messages.length) {
+            return markComplete();
+        }
+
+        console.log('decryptOldIncomingKeyErrors found', messages.length, 'messages to process');
+        var safeDelete = function(message) {
+            return new Promise(function(resolve) {
+                message.destroy().always(resolve);
+            });
+        };
+
+        return this.getIdentityKeys().then(function(lookup) {
+            return Promise.all(_.map(messages, function(message) {
+                var source = message.get('source');
+                var error = _.find(message.get('errors'), function(error) {
+                    return error.name === 'IncomingIdentityKeyError';
+                });
+
+                var key = lookup[source];
+                if (!key) {
+                    return;
+                }
+
+                if (constantTimeEqualArrayBuffers(key, error.identityKey)) {
+                    return this.replay(error, message).then(function() {
+                        return safeDelete(message);
+                    });
+                }
+            }.bind(this)));
+        }.bind(this)).catch(function(error) {
+            console.log(
+                'decryptOldIncomingKeyErrors error:',
+                error && error.stack ? error.stack : error
+            );
+        }).then(markComplete);
+    },
+    isVerified: function() {
+        if (this.isPrivate()) {
+            return this.get('verified') === this.verifiedEnum.VERIFIED;
+        } else {
+            if (!this.contactCollection.length) {
+                return false;
+            }
+
+            return this.contactCollection.every(function(contact) {
+                if (contact.isMe()) {
+                    return true;
+                } else {
+                    return contact.isVerified();
+                }
+            }.bind(this));
+        }
+    },
+    isUnverified: function() {
+        if (this.isPrivate()) {
+            var verified = this.get('verified');
+            return verified !== this.verifiedEnum.VERIFIED && verified !== this.verifiedEnum.DEFAULT;
+        } else {
+            if (!this.contactCollection.length) {
+                return true;
+            }
+
+            return this.contactCollection.any(function(contact) {
+                if (contact.isMe()) {
+                    return false;
+                } else {
+                    return contact.isUnverified();
+                }
+            }.bind(this));
+        }
+    },
+    getUnverified: function() {
+        if (this.isPrivate()) {
+            return this.isUnverified() ? new Backbone.Collection([this]) : new Backbone.Collection();
+        } else {
+            return new Backbone.Collection(this.contactCollection.filter(function(contact) {
+                if (contact.isMe()) {
+                    return false;
+                } else {
+                    return contact.isUnverified();
+                }
+            }.bind(this)));
+        }
+    },
+    setApproved: function() {
+        if (!this.isPrivate()) {
+            throw new Error('You cannot set a group conversation as trusted. ' +
+                            'You must set individual contacts as trusted.');
+        }
+
+        return textsecure.storage.protocol.setApproval(this.id, true);
+    },
+    safeIsUntrusted: function() {
+        return textsecure.storage.protocol.isUntrusted(this.id).catch(function() {
+            return false;
+        });
+    },
+    isUntrusted: function() {
+        if (this.isPrivate()) {
+            return this.safeIsUntrusted();
+        } else {
+            if (!this.contactCollection.length) {
+                return Promise.resolve(false);
+            }
+
+            return Promise.all(this.contactCollection.map(function(contact) {
+                if (contact.isMe()) {
+                    return false;
+                } else {
+                    return contact.safeIsUntrusted();
+                }
+            }.bind(this))).then(function(results) {
+                return _.any(results, function(result) {
+                    return result;
+                });
+            });
+        }
+    },
+    getUntrusted: function() {
+        // This is a bit ugly because isUntrusted() is async. Could do the work to cache
+        //   it locally, but we really only need it for this call.
+        if (this.isPrivate()) {
+            return this.isUntrusted().then(function(untrusted) {
+                if (untrusted) {
+                    return new Backbone.Collection([this]);
+                }
+
+                return new Backbone.Collection();
+            }.bind(this));
+        } else {
+            return Promise.all(this.contactCollection.map(function(contact) {
+                if (contact.isMe()) {
+                    return [false, contact];
+                } else {
+                    return Promise.all([contact.isUntrusted(), contact]);
+                }
+            }.bind(this))).then(function(results) {
+                results = _.filter(results, function(result) {
+                    var untrusted = result[0];
+                    return untrusted;
+                });
+                return new Backbone.Collection(_.map(results, function(result) {
+                    var contact = result[1];
+                    return contact;
+                }));
+            }.bind(this));
+        }
+    },
+    onMemberVerifiedChange: function() {
+        // If the verified state of a member changes, our aggregate state changes.
+        // We trigger both events to replicate the behavior of Backbone.Model.set()
+        this.trigger('change:verified');
+        this.trigger('change');
+    },
+    toggleVerified: function() {
+        if (this.isVerified()) {
+            return this.setVerifiedDefault();
+        } else {
+            return this.setVerified();
+        }
+    },
+
     addKeyChange: function(id) {
-        console.log('adding key change advisory for', this.id, this.get('timestamp'));
+        console.log('adding key change advisory for', this.id, id, this.get('timestamp'));
         var timestamp = Date.now();
         var message = new Whisper.Message({
             conversationId : this.id,
             type           : 'keychange',
             sent_at        : this.get('timestamp'),
             received_at    : timestamp,
-            key_changed    : id
+            key_changed    : id,
+            unread         : 1
         });
         message.save().then(this.trigger.bind(this,'newmessage', message));
+    },
+    addVerifiedChange: function(id, verified, options) {
+        options = options || {};
+        _.defaults(options, {local: true});
+
+        var lastMessage = this.get('timestamp') || Date.now();
+
+        console.log('adding verified change advisory for', this.id, id, lastMessage);
+
+        var timestamp = Date.now();
+        var message = new Whisper.Message({
+            conversationId  : this.id,
+            type            : 'verified-change',
+            sent_at         : lastMessage,
+            received_at     : timestamp,
+            verifiedChanged : id,
+            verified        : verified,
+            local           : options.local,
+            unread          : 1
+        });
+        message.save().then(this.trigger.bind(this,'newmessage', message));
+
+        if (this.isPrivate()) {
+            ConversationController.getAllGroupsInvolvingId(id).then(function(groups) {
+                _.forEach(groups, function(group) {
+                    group.addVerifiedChange(id, verified, options);
+                });
+            });
+        }
     },
 
     onReadMessage: function(message) {
@@ -77,7 +472,7 @@
 
         // Lastly, we don't send read receipts for any message marked read due to a read
         //   receipt. That's a notification explosion we don't need.
-        this.queueJob(function() {
+        return this.queueJob(function() {
             return this.markRead(message.get('received_at'), {sendReadReceipts: false});
         }.bind(this));
     },
@@ -147,7 +542,10 @@
 
     queueJob: function(callback) {
         var previous = this.pending || Promise.resolve();
-        var current = this.pending = previous.then(callback, callback);
+
+        var taskWithTimeout = textsecure.createTaskWithTimeout(callback, 'conversation ' + this.id);
+
+        var current = this.pending = previous.then(taskWithTimeout, taskWithTimeout);
 
         current.then(function() {
             if (this.pending === current) {
@@ -161,6 +559,7 @@
     sendMessage: function(body, attachments) {
         this.queueJob(function() {
             var now = Date.now();
+            console.log('Sending message to conversation', this.id, 'with timestamp', now);
             var message = this.messageCollection.add({
                 body           : body,
                 conversationId : this.id,
@@ -197,12 +596,15 @@
         return collection.fetchConversation(this.id, 1).then(function() {
             var lastMessage = collection.at(0);
             if (lastMessage) {
-              this.set({
-                lastMessage : lastMessage.getNotificationText(),
-                timestamp   : lastMessage.get('sent_at')
-              });
+                if (lastMessage.get('type') === 'verified-change') {
+                    return;
+                }
+                this.set({
+                   lastMessage : lastMessage.getNotificationText(),
+                   timestamp   : lastMessage.get('sent_at')
+                });
             } else {
-              this.set({ lastMessage: '', timestamp: null });
+                this.set({ lastMessage: '', timestamp: null });
             }
             if (this.hasChanged('lastMessage') || this.hasChanged('timestamp')) {
                 this.save();
@@ -311,6 +713,7 @@
         }));
 
         return this.getUnread().then(function(unreadMessages) {
+            var promises = [];
             var oldUnread = unreadMessages.filter(function(message) {
                 return message.get('received_at') <= newestUnreadDate;
             });
@@ -322,28 +725,81 @@
                     console.log('Marked a message as read in the database, but ' +
                                 'it was not in messageCollection.');
                 }
-                m.markRead();
+                promises.push(m.markRead());
                 return {
                     sender    : m.get('source'),
                     timestamp : m.get('sent_at')
                 };
             }.bind(this));
 
+            // Some messages we're marking read are local notifications with no sender
+            read = _.filter(read, function(m) {
+                return Boolean(m.sender);
+            });
+            unreadMessages = unreadMessages.filter(function(m) {
+                return Boolean(m.isIncoming());
+            });
+
             var unreadCount = unreadMessages.length - read.length;
-            this.save({ unreadCount: unreadCount });
+            var promise = new Promise(function(resolve, reject) {
+                this.save({ unreadCount: unreadCount }).then(resolve, reject);
+            }.bind(this));
+            promises.push(promise);
 
             if (read.length && options.sendReadReceipts) {
                 console.log('Sending', read.length, 'read receipts');
-                textsecure.messaging.syncReadMessages(read);
+                promises.push(textsecure.messaging.syncReadMessages(read));
             }
+
+            return Promise.all(promises);
         }.bind(this));
     },
 
+    getProfiles: function() {
+        // request all conversation members' keys
+        var ids = [];
+        if (this.isPrivate()) {
+            ids = [this.id];
+        } else {
+            ids = this.get('members');
+        }
+        return Promise.all(_.map(ids, this.getProfile));
+    },
+
+    getProfile: function(id) {
+        return textsecure.messaging.getProfile(id).then(function(profile) {
+            var identityKey = dcodeIO.ByteBuffer.wrap(profile.identityKey, 'base64').toArrayBuffer();
+
+            return textsecure.storage.protocol.saveIdentity(
+                id + '.1', identityKey, false
+            ).then(function(changed) {
+              if (changed) {
+                  // save identity will close all sessions except for .1, so we
+                  // must close that one manually.
+                  var address = new libsignal.SignalProtocolAddress(id, 1);
+                  console.log('closing session for', address.toString());
+                  var sessionCipher = new libsignal.SessionCipher(textsecure.storage.protocol, address);
+                  return sessionCipher.closeOpenSessionForDevice();
+              }
+            });
+        }).catch(function(error) {
+            console.log(
+                'getProfile error:',
+                error && error.stack ? error.stack : error
+            );
+        });
+    },
+
     fetchMessages: function() {
-        if (!this.id) { return false; }
+        if (!this.id) {
+            return Promise.reject('This conversation has no id!');
+        }
         return this.messageCollection.fetchConversation(this.id, null, this.get('unreadCount'));
     },
 
+    hasMember: function(number) {
+        return _.contains(this.get('members'), number);
+    },
     fetchContacts: function(options) {
         return new Promise(function(resolve) {
             if (this.isPrivate()) {
@@ -352,15 +808,15 @@
             } else {
                 var promises = [];
                 var members = this.get('members') || [];
+
                 this.contactCollection.reset(
                     members.map(function(number) {
                         var c = ConversationController.create({
                             id   : number,
                             type : 'private'
                         });
-                        promises.push(new Promise(function(resolve) {
-                            c.fetch().always(resolve);
-                        }));
+                        this.listenTo(c, 'change:verified', this.onMemberVerifiedChange);
+                        promises.push(c.safeFetch());
                         return c;
                     }.bind(this))
                 );
@@ -491,65 +947,36 @@
         }.bind(this));
     },
 
-    resolveConflicts: function(conflict) {
-        var number = conflict.number;
-        var identityKey = conflict.identityKey;
-        if (this.isPrivate()) {
-            number = this.id;
-        } else if (!_.include(this.get('members'), number)) {
-            throw 'Tried to resolve conflicts for a unknown group member';
-        }
-
-        if (!this.messageCollection.hasKeyConflicts()) {
-            throw 'No conflicts to resolve';
-        }
-
-        return textsecure.storage.protocol.removeIdentityKey(number).then(function() {
-            return textsecure.storage.protocol.saveIdentity(number, identityKey).then(function() {
-                var promise = Promise.resolve();
-                var conflicts = this.messageCollection.filter(function(message) {
-                    return message.hasKeyConflict(number);
-                });
-                // group incoming & outgoing
-                conflicts = _.groupBy(conflicts, function(m) { return m.get('type'); });
-                // sort each group by date and concatenate outgoing after incoming
-                conflicts = _.flatten([
-                    _.sortBy(conflicts.incoming, function(m) { return m.get('received_at'); }),
-                    _.sortBy(conflicts.outgoing, function(m) { return m.get('received_at'); }),
-                ]).forEach(function(message) {
-                    var resolveConflict = function() {
-                        return message.resolveConflict(number);
-                    };
-                    promise = promise.then(resolveConflict, resolveConflict);
-                });
-                return promise;
-            }.bind(this));
-        }.bind(this));
-    },
     notify: function(message) {
         if (!message.isIncoming()) {
-            return;
+            return Promise.resolve();
         }
         if (window.isOpen() && window.isFocused()) {
-            return;
+            return Promise.resolve();
         }
+
         window.drawAttention();
         var sender = ConversationController.create({
             id: message.get('source'), type: 'private'
         });
         var conversationId = this.id;
-        sender.fetch().then(function() {
-            sender.getNotificationIcon().then(function(iconUrl) {
-                console.log('adding notification');
-                Whisper.Notifications.add({
-                    title          : sender.getTitle(),
-                    message        : message.getNotificationText(),
-                    iconUrl        : iconUrl,
-                    imageUrl       : message.getImageUrl(),
-                    conversationId : conversationId,
-                    messageId      : message.id
-                });
-            });
+
+        return new Promise(function(resolve, reject) {
+            sender.fetch().then(function() {
+                sender.getNotificationIcon().then(function(iconUrl) {
+                    console.log('adding notification');
+                    Whisper.Notifications.add({
+                        title          : sender.getTitle(),
+                        message        : message.getNotificationText(),
+                        iconUrl        : iconUrl,
+                        imageUrl       : message.getImageUrl(),
+                        conversationId : conversationId,
+                        messageId      : message.id
+                    });
+
+                    return resolve();
+                }, reject);
+            }, reject);
         });
     },
     hashCode: function() {

@@ -50,8 +50,7 @@ body {
   height: 24px;
   line-height: 24px;
   padding: 0;
-  border: 0;
-  outline: 0; }
+  border: 0; }
 
 button {
   cursor: pointer;
@@ -279,6 +278,9 @@ button.hamburger {
     border-width: 0 0 1px 0;
     width: calc(100% - 84px); }
 
+.group-member-list .summary,
+.new-group-update .summary {
+  margin: 10px; }
 .group-member-list .members .contact,
 .new-group-update .members .contact {
   box-shadow: none;
@@ -327,12 +329,43 @@ button.hamburger {
   .contact:last-child::after {
     display: none; }
 
+.banner {
+  background-color: #a2d2f4;
+  color: black;
+  box-shadow: 0px 3px 5px 0px rgba(0, 0, 0, 0.2);
+  position: absolute;
+  top: 25px;
+  right: 30px;
+  left: 30px;
+  padding: 5px 25px 5px 10px;
+  text-align: center;
+  border-radius: 10px;
+  cursor: pointer; }
+  .banner .warning {
+    width: 18px;
+    height: 18px;
+    display: inline-block;
+    vertical-align: text-bottom;
+    -webkit-mask: url("/images/warning.svg") no-repeat center;
+    -webkit-mask-size: 100%;
+    background-color: black; }
+  .banner .dismiss {
+    position: absolute;
+    right: 3px;
+    top: 3px;
+    height: 23px;
+    width: 23px;
+    -webkit-mask: url("/images/x.svg") no-repeat center;
+    -webkit-mask-size: 100%;
+    background-color: black; }
+
 .contact-details {
   vertical-align: middle;
   display: inline-block;
   margin: 0 0 0 8px;
   width: calc(100% - 44px - 8px - 0.28571em);
-  text-align: left; }
+  text-align: left;
+  cursor: pointer; }
   .contact-details p {
     overflow-x: hidden;
     text-overflow: ellipsis; }
@@ -346,6 +379,16 @@ button.hamburger {
   .contact-details .number {
     color: #616161;
     font-size: 0.92857em; }
+  .contact-details.not-clickable {
+    cursor: default; }
+  .contact-details .verified-icon {
+    -webkit-mask: url("/images/verified-check.svg") no-repeat center;
+    -webkit-mask-size: 100%;
+    background-color: #616161;
+    display: inline-block;
+    width: 1.25em;
+    height: 1.25em;
+    vertical-align: text-bottom; }
 
 .recipients-input {
   position: relative; }
@@ -440,6 +483,48 @@ input[type=text]:active, input[type=text]:focus, input[type=search]:active, inpu
     padding: 0 20px;
     background: #2090ea;
     margin-left: 20px; }
+
+.inbox {
+  position: relative; }
+
+@keyframes loading {
+  50% {
+    transform: scale(1);
+    opacity: 1; }
+  100% {
+    opacity: 0; } }
+.app-loading-screen {
+  z-index: 1000;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  background-color: white;
+  display: flex;
+  align-items: center; }
+  .app-loading-screen .content {
+    margin-left: auto;
+    margin-right: auto;
+    text-align: center; }
+  .app-loading-screen .container {
+    margin-left: auto;
+    margin-right: auto;
+    width: 78px;
+    height: 22px; }
+  .app-loading-screen .dot {
+    width: 14px;
+    height: 14px;
+    border: 3px solid #2090ea;
+    border-radius: 50%;
+    float: left;
+    margin: 0 6px;
+    transform: scale(0);
+    animation: loading 1500ms ease infinite 0ms; }
+    .app-loading-screen .dot:nth-child(2) {
+      animation: loading 1500ms ease infinite 333ms; }
+    .app-loading-screen .dot:nth-child(3) {
+      animation: loading 1500ms ease infinite 666ms; }
 
 .inbox:focus {
   outline: none; }
@@ -722,6 +807,22 @@ img.emoji.jumbo {
   width: 2em;
   height: 2em; }
 
+.conversations img.emoji.small {
+  width: 1em;
+  height: 1em; }
+
+.conversations img.emoji.medium {
+  width: 1em;
+  height: 1em; }
+
+.conversations img.emoji.large {
+  width: 1em;
+  height: 1em; }
+
+.conversations img.emoji.jumbo {
+  width: 1em;
+  height: 1em; }
+
 .settings.modal {
   padding: 50px; }
   .settings.modal .content {
@@ -816,6 +917,10 @@ img.emoji.jumbo {
   background-color: #f3f3f3 !important;
   color: #454545;
   border-color: rgba(0, 0, 0, 0.05); }
+  .inactive .conversation-header .verified-icon {
+    -webkit-mask: url("/images/verified-check.svg") no-repeat center;
+    -webkit-mask-size: 100%;
+    background-color: #454545; }
 
 .tool-bar {
   position: relative; }
@@ -972,15 +1077,63 @@ input.search {
   font-weight: bold;
   padding: 0 5px 0 4px; }
 
+.conversation-title .verified:before {
+  content: "\00b7";
+  font-weight: bold;
+  padding: 0 5px 0 4px; }
+
+.conversation-title .verified-icon {
+  -webkit-mask: url("/images/verified-check.svg") no-repeat center;
+  -webkit-mask-size: 100%;
+  background-color: white;
+  display: inline-block;
+  width: 1.25em;
+  height: 1.25em;
+  vertical-align: text-bottom; }
+
 .conversation {
   background-color: white;
-  height: 100%; }
+  height: 100%;
+  position: relative; }
+  .conversation .conversation-loading-screen {
+    z-index: 99;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    background-color: #eee;
+    display: flex;
+    align-items: center; }
+    .conversation .conversation-loading-screen .content {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%); }
+    .conversation .conversation-loading-screen .container {
+      position: absolute;
+      left: 50%;
+      width: 78px;
+      transform: translate(-50%, 0); }
+    .conversation .conversation-loading-screen .dot {
+      width: 14px;
+      height: 14px;
+      border: 3px solid #2090ea;
+      border-radius: 50%;
+      float: left;
+      margin: 0 6px;
+      transform: scale(0);
+      animation: loading 1500ms ease infinite 0ms; }
+      .conversation .conversation-loading-screen .dot:nth-child(2) {
+        animation: loading 1500ms ease infinite 333ms; }
+      .conversation .conversation-loading-screen .dot:nth-child(3) {
+        animation: loading 1500ms ease infinite 666ms; }
   .conversation .panel {
     height: calc(100% - 64px);
     overflow-y: scroll; }
     .conversation .panel .container {
       padding-top: 20px;
-      max-width: 950px;
+      max-width: 750px;
       margin: 0 auto;
       padding: 20px; }
   .conversation .main.panel {
@@ -1010,6 +1163,19 @@ input.search {
   display: block;
   margin: 10px 0;
   font-size: 0.92857em; }
+.key-verification .icon {
+  height: 1.25em;
+  width: 1.25em;
+  vertical-align: text-bottom;
+  display: inline-block; }
+  .key-verification .icon.verified {
+    -webkit-mask: url("/images/verified-check.svg") no-repeat center;
+    -webkit-mask-size: 100%;
+    background-color: #454545; }
+  .key-verification .icon.shield {
+    -webkit-mask: url("/images/shield.svg") no-repeat center;
+    -webkit-mask-size: 100%;
+    background-color: #454545; }
 .key-verification .key, .key-verification .placeholder {
   padding: 0 1em;
   -webkit-user-select: text; }
@@ -1036,34 +1202,31 @@ input.search {
   .key-verification .qr img {
     display: inline-block;
     max-width: 100%; }
+.key-verification .summary {
+  margin: 30px 0 10px;
+  text-align: center; }
+.key-verification div.verify {
+  text-align: center; }
+.key-verification button.verify {
+  border-radius: 5px;
+  font-weight: bold;
+  padding: 10px;
+  margin: 0; }
+
+.identity-key-send-error button {
+  margin-top: 0px;
+  margin-bottom: 0px; }
+.identity-key-send-error .explanation {
+  margin-top: 20px; }
+.identity-key-send-error .safety-number {
+  margin-top: 30px;
+  text-align: center; }
+.identity-key-send-error .actions {
+  margin-top: 30px;
+  text-align: center; }
 
 .message-detail {
   background-color: #eee; }
-  .message-detail .key-conflict-dialogue {
-    border-radius: 5px;
-    margin: 20px 0; }
-    .message-detail .key-conflict-dialogue .header {
-      border-radius: 5px 5px 0 0;
-      background: #F3F3A7;
-      margin: 0;
-      padding: 10px 20px; }
-    .message-detail .key-conflict-dialogue .content {
-      padding: 20px;
-      border: 2px solid #F3F3A7; }
-    .message-detail .key-conflict-dialogue button.resolve {
-      outline: none;
-      border: none;
-      border-radius: 5px;
-      color: white;
-      font-weight: bold;
-      line-height: 36px;
-      padding: 0 20px;
-      float: right;
-      background: #2090ea;
-      margin-left: 20px; }
-    .message-detail .key-conflict-dialogue .hideKeys, .message-detail .key-conflict-dialogue .showKeys {
-      float: right;
-      line-height: 36px; }
   .message-detail .message-container {
     padding: 20px 0; }
     .message-detail .message-container .sender {
@@ -1082,11 +1245,27 @@ input.search {
       font-weight: bold; }
       .message-detail .info button span {
         vertical-align: middle; }
+  .message-detail .retries {
+    padding: 1em; }
+  .message-detail button.retry {
+    margin: 0.5em; }
   .message-detail .contacts .contact-detail {
     padding: 0 36px;
     margin-bottom: 5px; }
     .message-detail .contacts .contact-detail .error-icon-container {
       float: right; }
+    .message-detail .contacts .contact-detail button.error {
+      background-color: red;
+      color: white; }
+      .message-detail .contacts .contact-detail button.error span.icon.error {
+        display: inline-block;
+        width: 1.25em;
+        height: 1.25em;
+        position: relative;
+        vertical-align: middle;
+        -webkit-mask: url("/images/warning.svg") no-repeat center;
+        -webkit-mask-size: 100%;
+        background-color: white; }
     .message-detail .contacts .contact-detail .error-message {
       margin: 6px 0 0;
       font-size: 0.92857em;
@@ -1095,13 +1274,15 @@ input.search {
   .message-detail h3 {
     font-size: 1em;
     padding: 5px; }
-  .message-detail button.conflict {
-    float: right;
-    background: #d00; }
   .message-detail button.cancel {
     float: right;
     color: #454545;
     border: solid 1px #ccc; }
+  .message-detail .delete-container {
+    text-align: center; }
+    .message-detail .delete-container button.delete {
+      background-color: red;
+      color: white; }
 
 .message-list .error-icon {
   cursor: pointer; }
@@ -1232,6 +1413,12 @@ li.entry .error-icon-container {
     .message-list .meta .retry {
       text-decoration: underline;
       cursor: pointer; }
+    .message-container .meta .some-failed,
+    .message-list .meta .some-failed {
+      float: left;
+      margin-left: 6px;
+      margin-right: 6px;
+      cursor: pointer; }
     .message-container .meta .hasRetry, .message-container .meta .timestamp, .message-container .meta .status, .message-container .meta .timer,
     .message-list .meta .hasRetry,
     .message-list .meta .timestamp,
@@ -1339,6 +1526,7 @@ li.entry .error-icon-container {
   .message-list .attachments .fileView {
     display: flex;
     align-items: center;
+    overflow: hidden;
     position: relative;
     padding: 5px;
     padding-right: 10px;
@@ -1346,7 +1534,13 @@ li.entry .error-icon-container {
     .message-container .attachments .fileView .fileName,
     .message-list .attachments .fileView .fileName {
       font-weight: bold;
-      margin-bottom: 0.25em; }
+      margin-bottom: 0.25em;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis; }
+    .message-container .attachments .fileView .text,
+    .message-list .attachments .fileView .text {
+      overflow: hidden; }
     .message-container .attachments .fileView .icon, .message-container .attachments .fileView .text,
     .message-list .attachments .fileView .icon,
     .message-list .attachments .fileView .text {
@@ -1360,28 +1554,24 @@ li.entry .error-icon-container {
       margin-left: -0.5em;
       margin-right: 0.5em;
       display: inline-block;
-      vertical-align: middle; }
-      .message-container .attachments .fileView .icon:before,
-      .message-list .attachments .fileView .icon:before {
-        content: '';
-        display: inline-block;
-        width: 48px;
-        height: 48px;
-        -webkit-mask: url("/images/file.svg") no-repeat center;
-        -webkit-mask-size: 100%;
-        background-color: #454545; }
-      .message-container .attachments .fileView .icon.audio:before,
-      .message-list .attachments .fileView .icon.audio:before {
+      vertical-align: middle;
+      width: 48px;
+      height: 48px;
+      -webkit-mask: url("/images/file.svg") no-repeat center;
+      -webkit-mask-size: 100%;
+      background-color: #454545; }
+      .message-container .attachments .fileView .icon.audio,
+      .message-list .attachments .fileView .icon.audio {
         -webkit-mask: url("/images/audio.svg") no-repeat center;
         -webkit-mask-size: 100%;
         background-color: #454545; }
-      .message-container .attachments .fileView .icon.video:before,
-      .message-list .attachments .fileView .icon.video:before {
+      .message-container .attachments .fileView .icon.video,
+      .message-list .attachments .fileView .icon.video {
         -webkit-mask: url("/images/video.svg") no-repeat center;
         -webkit-mask-size: 100%;
         background-color: #454545; }
-      .message-container .attachments .fileView .icon.voice:before,
-      .message-list .attachments .fileView .icon.voice:before {
+      .message-container .attachments .fileView .icon.voice,
+      .message-list .attachments .fileView .icon.voice {
         -webkit-mask: url("/images/voice.svg") no-repeat center;
         -webkit-mask-size: 100%;
         background-color: #454545; }
@@ -1392,16 +1582,9 @@ li.entry .error-icon-container {
   .message-list .bubble .content.error-message {
     cursor: pointer;
     font-style: italic; }
-  .message-container .key-conflict,
-  .message-list .key-conflict {
-    padding: 15px 10px; }
-    .message-container .key-conflict button,
-    .message-list .key-conflict button {
-      margin-top: 5px; }
 
 .message-list .avatar,
-.message-container .avatar,
-.key-conflict-dialogue .avatar {
+.message-container .avatar {
   height: 36px;
   width: 36px;
   line-height: 36px; }
@@ -1478,8 +1661,6 @@ li.entry .error-icon-container {
   border-radius: 5px;
   overflow: auto;
   box-shadow: 0px 0px 15px 0px rgba(0, 0, 0, 0.3); }
-  .confirmation-dialog .content .message {
-    text-align: center; }
   .confirmation-dialog .content .buttons {
     margin-top: 10px; }
     .confirmation-dialog .content .buttons button {
@@ -1487,23 +1668,46 @@ li.entry .error-icon-container {
       margin-left: 10px;
       background-color: #f3f3f3;
       border-radius: 5px;
-      outline: none;
       padding: 5px 8px;
       border: 1px solid #d9d9d9; }
-      .confirmation-dialog .content .buttons button:focus {
-        border-color: #8d8d8d; }
       .confirmation-dialog .content .buttons button:hover {
         background-color: #d9d9d9;
         border-color: silver; }
 
-.message-list li.keychange {
+.advisory .icon {
+  height: 1.25em;
+  width: 1.25em;
+  vertical-align: text-bottom;
+  display: inline-block; }
+  .advisory .icon.verified {
+    -webkit-mask: url("/images/verified-check.svg") no-repeat center;
+    -webkit-mask-size: 100%;
+    background-color: #454545; }
+  .advisory .icon.shield {
+    -webkit-mask: url("/images/shield.svg") no-repeat center;
+    -webkit-mask-size: 100%;
+    background-color: #454545; }
+  .advisory .icon.clock {
+    -webkit-mask: url("/images/clock.svg") no-repeat center;
+    -webkit-mask-size: 100%;
+    background-color: #454545; }
+
+.keychange {
   text-align: center; }
-  .message-list li.keychange .content {
+  .keychange .content {
     cursor: pointer;
     display: inline-block;
     padding: 5px 10px;
     background: #fff5c4;
-    color: #454545;
+    border-radius: 5px; }
+
+.verified-change {
+  text-align: center; }
+  .verified-change .content {
+    cursor: pointer;
+    display: inline-block;
+    padding: 5px 10px;
+    background: #fff5c4;
     border-radius: 5px; }
 
 .message-list .last-seen-indicator-view {
@@ -1575,6 +1779,8 @@ li.entry .error-icon-container {
       color: white; }
       .ios .gutter .contact.selected .last-timestamp {
         color: white; }
+.ios .banner {
+  top: 15px; }
 .ios .tool-bar {
   float: left;
   padding: 15px; }
@@ -1602,6 +1808,10 @@ li.entry .error-icon-container {
   text-align: left; }
   .ios .conversation-header .conversation-title {
     line-height: 64px; }
+    .ios .conversation-header .conversation-title .verified-icon {
+      -webkit-mask: url("/images/verified-check.svg") no-repeat center;
+      -webkit-mask-size: 100%;
+      background-color: #454545; }
   .ios .conversation-header .avatar {
     display: none; }
 .ios .settings h3,
@@ -1672,7 +1882,8 @@ li.entry .error-icon-container {
 .ios .incoming .bubbled {
   background-color: white;
   color: black;
-  float: left; }
+  float: left;
+  max-width: 100%; }
   .ios .incoming .bubbled:before {
     left: -1px;
     background-color: white; }
@@ -1689,28 +1900,29 @@ li.entry .error-icon-container {
     left: -6px; }
 .ios .outgoing .content, .ios .outgoing .attachments .bubbled {
   background-color: #2090ea;
+  max-width: 100%;
   float: right; }
   .ios .outgoing .content, .ios .outgoing .content .body, .ios .outgoing .content a, .ios .outgoing .attachments .bubbled, .ios .outgoing .attachments .bubbled .body, .ios .outgoing .attachments .bubbled a {
     color: white; }
     .ios .outgoing .content::selection, .ios .outgoing .content .body::selection, .ios .outgoing .content a::selection, .ios .outgoing .attachments .bubbled::selection, .ios .outgoing .attachments .bubbled .body::selection, .ios .outgoing .attachments .bubbled a::selection {
       background: white;
       color: #454545; }
-.ios .outgoing .attachments .fileView .icon::before {
+.ios .outgoing .attachments .fileView .icon {
   -webkit-mask: url("/images/file.svg") no-repeat center;
   -webkit-mask-size: 100%;
   background-color: white; }
-.ios .outgoing .attachments .fileView .icon.audio:before {
-  -webkit-mask: url("/images/audio.svg") no-repeat center;
-  -webkit-mask-size: 100%;
-  background-color: white; }
-.ios .outgoing .attachments .fileView .icon.video:before {
-  -webkit-mask: url("/images/video.svg") no-repeat center;
-  -webkit-mask-size: 100%;
-  background-color: white; }
-.ios .outgoing .attachments .fileView .icon.voice:before {
-  -webkit-mask: url("/images/voice.svg") no-repeat center;
-  -webkit-mask-size: 100%;
-  background-color: white; }
+  .ios .outgoing .attachments .fileView .icon.audio {
+    -webkit-mask: url("/images/audio.svg") no-repeat center;
+    -webkit-mask-size: 100%;
+    background-color: white; }
+  .ios .outgoing .attachments .fileView .icon.video {
+    -webkit-mask: url("/images/video.svg") no-repeat center;
+    -webkit-mask-size: 100%;
+    background-color: white; }
+  .ios .outgoing .attachments .fileView .icon.voice {
+    -webkit-mask: url("/images/voice.svg") no-repeat center;
+    -webkit-mask-size: 100%;
+    background-color: white; }
 .ios .attachment {
   margin-bottom: 1px; }
   .ios .attachment a {
@@ -1842,7 +2054,7 @@ li.entry .error-icon-container {
     color: #454545; }
 .android .incoming .bubble .attachments a, .android .incoming .bubble .content a {
   color: #f3f3f3; }
-.android .incoming .bubble .fileView .icon::before {
+.android .incoming .bubble .fileView .icon {
   -webkit-mask: url("/images/file.svg") no-repeat center;
   -webkit-mask-size: 100%;
   background-color: white; }
@@ -1897,6 +2109,8 @@ li.entry .error-icon-container {
 
 .android-dark {
   color: #CCCCCC; }
+  .android-dark .app-loading-screen {
+    background-color: #333333; }
   .android-dark .gutter .content {
     background-color: #333333; }
   .android-dark a {
@@ -1925,6 +2139,14 @@ li.entry .error-icon-container {
   .android-dark .key-verification .key {
     background-color: #030303;
     border-color: #292929; }
+  .android-dark .key-verification .icon.verified {
+    -webkit-mask: url("/images/verified-check.svg") no-repeat center;
+    -webkit-mask-size: 100%;
+    background-color: #CCCCCC; }
+  .android-dark .key-verification .icon.shield {
+    -webkit-mask: url("/images/shield.svg") no-repeat center;
+    -webkit-mask-size: 100%;
+    background-color: #CCCCCC; }
   .android-dark .menu-list {
     background-color: #292929;
     color: #CCCCCC; }
@@ -1944,11 +2166,19 @@ li.entry .error-icon-container {
       color: #CCCCCC; }
   .android-dark .contact-details .name {
     font-weight: 400; }
+  .android-dark .contact-details .number {
+    color: gray; }
+    .android-dark .contact-details .number .verified-icon {
+      -webkit-mask: url("/images/verified-check.svg") no-repeat center;
+      -webkit-mask-size: 100%;
+      background-color: gray; }
   .android-dark .group-member-list .members .contact, .android-dark .new-group-update .members .contact, .android-dark .attachment-previews img {
     background-color: #171717;
     border-color: #333333; }
   .android-dark .conversation.placeholder .conversation-header {
     display: none; }
+  .android-dark .conversation .conversation-loading-screen {
+    background-color: #171717; }
   .android-dark .avatar.red, .android-dark .conversation-header.red, .android-dark .bubble.red {
     background-color: #D32F2F; }
   .android-dark .avatar.pink, .android-dark .conversation-header.pink, .android-dark .bubble.pink {
@@ -1985,9 +2215,25 @@ li.entry .error-icon-container {
     background-color: #2090ea; }
   .android-dark .message-list .advisory .content {
     background-color: #333333; }
+  .android-dark .message-list .advisory .shield {
+    -webkit-mask: url("/images/shield.svg") no-repeat center;
+    -webkit-mask-size: 100%;
+    background-color: #CCCCCC; }
+  .android-dark .message-list .advisory .verified {
+    -webkit-mask: url("/images/verified-check.svg") no-repeat center;
+    -webkit-mask-size: 100%;
+    background-color: #CCCCCC; }
+  .android-dark .message-list .advisory .clock {
+    -webkit-mask: url("/images/clock.svg") no-repeat center;
+    -webkit-mask-size: 100%;
+    background-color: #CCCCCC; }
   .android-dark .inactive .conversation-header {
     background-color: #333333 !important;
     color: #CCCCCC; }
+    .android-dark .inactive .conversation-header .verified-icon {
+      -webkit-mask: url("/images/verified-check.svg") no-repeat center;
+      -webkit-mask-size: 100%;
+      background-color: #CCCCCC; }
   .android-dark .sent .status {
     display: inline-block;
     -webkit-mask: url("/images/check.svg") no-repeat center;
@@ -2092,38 +2338,38 @@ li.entry .error-icon-container {
       color: #454545; }
   .android-dark .incoming .bubble .content a {
     color: #f3f3f3; }
-  .android-dark .incoming .bubble .fileView .icon::before {
+  .android-dark .incoming .bubble .fileView .icon {
     -webkit-mask: url("/images/file.svg") no-repeat center;
     -webkit-mask-size: 100%;
     background-color: white; }
-  .android-dark .incoming .bubble .fileView .icon.audio:before {
-    -webkit-mask: url("/images/audio.svg") no-repeat center;
-    -webkit-mask-size: 100%;
-    background-color: white; }
-  .android-dark .incoming .bubble .fileView .icon.video:before {
-    -webkit-mask: url("/images/video.svg") no-repeat center;
-    -webkit-mask-size: 100%;
-    background-color: white; }
-  .android-dark .incoming .bubble .fileView .icon.voice:before {
-    -webkit-mask: url("/images/voice.svg") no-repeat center;
-    -webkit-mask-size: 100%;
-    background-color: white; }
-  .android-dark .outgoing .bubble .fileView .icon::before {
+    .android-dark .incoming .bubble .fileView .icon.audio {
+      -webkit-mask: url("/images/audio.svg") no-repeat center;
+      -webkit-mask-size: 100%;
+      background-color: white; }
+    .android-dark .incoming .bubble .fileView .icon.video {
+      -webkit-mask: url("/images/video.svg") no-repeat center;
+      -webkit-mask-size: 100%;
+      background-color: white; }
+    .android-dark .incoming .bubble .fileView .icon.voice {
+      -webkit-mask: url("/images/voice.svg") no-repeat center;
+      -webkit-mask-size: 100%;
+      background-color: white; }
+  .android-dark .outgoing .bubble .fileView .icon {
     -webkit-mask: url("/images/file.svg") no-repeat center;
     -webkit-mask-size: 100%;
     background-color: #CCCCCC; }
-  .android-dark .outgoing .bubble .fileView .icon.audio:before {
-    -webkit-mask: url("/images/audio.svg") no-repeat center;
-    -webkit-mask-size: 100%;
-    background-color: #CCCCCC; }
-  .android-dark .outgoing .bubble .fileView .icon.video:before {
-    -webkit-mask: url("/images/video.svg") no-repeat center;
-    -webkit-mask-size: 100%;
-    background-color: #CCCCCC; }
-  .android-dark .outgoing .bubble .fileView .icon.voice:before {
-    -webkit-mask: url("/images/voice.svg") no-repeat center;
-    -webkit-mask-size: 100%;
-    background-color: #CCCCCC; }
+    .android-dark .outgoing .bubble .fileView .icon.audio {
+      -webkit-mask: url("/images/audio.svg") no-repeat center;
+      -webkit-mask-size: 100%;
+      background-color: #CCCCCC; }
+    .android-dark .outgoing .bubble .fileView .icon.video {
+      -webkit-mask: url("/images/video.svg") no-repeat center;
+      -webkit-mask-size: 100%;
+      background-color: #CCCCCC; }
+    .android-dark .outgoing .bubble .fileView .icon.voice {
+      -webkit-mask: url("/images/voice.svg") no-repeat center;
+      -webkit-mask-size: 100%;
+      background-color: #CCCCCC; }
   .android-dark button.clock {
     -webkit-mask: url("/images/clock.svg") no-repeat center;
     -webkit-mask-size: 100%;
@@ -2178,5 +2424,9 @@ li.entry .error-icon-container {
         background-color: white; }
       .android-dark .discussion-container .scroll-down-button-view button.new-messages:hover {
         background-color: #1472bd; }
+  .android-dark .choose-file button:hover {
+    background-color: #333333; }
+  .android-dark .capture-audio button:hover {
+    background-color: #333333; }
 
 /*# sourceMappingURL=manifest.css.map */

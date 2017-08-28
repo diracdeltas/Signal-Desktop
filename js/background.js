@@ -112,7 +112,10 @@
         messageReceiver.addEventListener('group', onGroupReceived);
         messageReceiver.addEventListener('sent', onSentMessage);
         messageReceiver.addEventListener('read', onReadReceipt);
+        messageReceiver.addEventListener('verified', onVerified);
         messageReceiver.addEventListener('error', onError);
+        messageReceiver.addEventListener('empty', onEmpty);
+        messageReceiver.addEventListener('progress', onProgress);
 
         window.textsecure.messaging = new textsecure.MessageSender(
             SERVER_URL, SERVER_PORTS, USERNAME, PASSWORD
@@ -136,48 +139,89 @@
         }
     }
 
-    function onContactReceived(ev) {
-        var contactDetails = ev.contactDetails;
+    function onEmpty() {
+        initialLoadComplete = true;
 
+        var interval = setInterval(function() {
+            var view = window.owsDesktopApp.inboxView;
+            if (view) {
+                clearInterval(interval);
+                interval = null;
+                view.onEmpty();
+            }
+        }, 500);
+    }
+    function onProgress(ev) {
+        var count = ev.count;
+
+        var view = window.owsDesktopApp.inboxView;
+        if (view) {
+            view.onProgress(count);
+        }
+    }
+
+    function onContactReceived(ev) {
+        var details = ev.contactDetails;
+
+        var id = details.number;
         var c = new Whisper.Conversation({
-            name: contactDetails.name,
-            id: contactDetails.number,
-            avatar: contactDetails.avatar,
-            color: contactDetails.color,
-            type: 'private',
-            active_at: Date.now()
+            id: id
         });
-        var error;
-        if ((error = c.validateNumber())) {
-          console.log(error);
-          return;
+        var error = c.validateNumber();
+        if (error) {
+            console.log('Invalid contact received', error && error.stack ? error.stack : error);
+            return;
         }
 
-        ConversationController.create(c).save();
+        return ConversationController.findOrCreateById(id, 'private').then(function(conversation) {
+            return new Promise(function(resolve, reject) {
+                conversation.save({
+                    name: details.name,
+                    avatar: details.avatar,
+                    color: details.color,
+                    active_at: conversation.get('active_at') || Date.now(),
+                }).then(resolve, reject);
+            });
+        }).then(ev.confirm);
     }
 
     function onGroupReceived(ev) {
-        var groupDetails = ev.groupDetails;
-        var attributes = {
-            id: groupDetails.id,
-            name: groupDetails.name,
-            members: groupDetails.members,
-            avatar: groupDetails.avatar,
-            type: 'group',
-        };
-        if (groupDetails.active) {
-            attributes.active_at = Date.now();
-        } else {
-            attributes.left = true;
-        }
-        var conversation = ConversationController.create(attributes);
-        conversation.save();
+        var details = ev.groupDetails;
+        var id = details.id;
+
+        return ConversationController.findOrCreateById(id, 'group').then(function(conversation) {
+            var updates = {
+                name: details.name,
+                members: details.members,
+                avatar: details.avatar,
+                type: 'group',
+            };
+            if (details.active) {
+                updates.active_at = Date.now();
+            } else {
+                updates.left = true;
+            }
+            return new Promise(function(resolve, reject) {
+                conversation.save(updates).then(resolve, reject);
+            }).then(ev.confirm);
+        });
     }
 
     function onMessageReceived(ev) {
         var data = ev.data;
-        var message = initIncomingMessage(data.source, data.timestamp);
-        message.handleDataMessage(data.message);
+        var message = initIncomingMessage(data);
+
+        return isMessageDuplicate(message).then(function(isDuplicate) {
+            if (isDuplicate) {
+                console.log('Received duplicate message', message.idForLogging());
+                ev.confirm();
+                return;
+            }
+
+            return message.handleDataMessage(data.message, ev.confirm, {
+                initialLoadComplete: initialLoadComplete
+            });
+        });
     }
 
     function onSentMessage(ev) {
@@ -186,6 +230,7 @@
 
         var message = new Whisper.Message({
             source         : textsecure.storage.user.getNumber(),
+            sourceDevice   : data.device,
             sent_at        : data.timestamp,
             received_at    : now,
             conversationId : data.destination,
@@ -194,17 +239,53 @@
             expirationStartTimestamp: data.expirationStartTimestamp,
         });
 
-        message.handleDataMessage(data.message);
+        return isMessageDuplicate(message).then(function(isDuplicate) {
+            if (isDuplicate) {
+                console.log('Received duplicate message', message.idForLogging());
+                ev.confirm();
+                return;
+            }
+
+            return message.handleDataMessage(data.message, ev.confirm, {
+                initialLoadComplete: initialLoadComplete
+            });
+        });
     }
 
-    function initIncomingMessage(source, timestamp) {
-        var now = new Date().getTime();
+    function isMessageDuplicate(message) {
+        return new Promise(function(resolve) {
+            var fetcher = new Whisper.Message();
+            var options = {
+                index: {
+                    name: 'unique',
+                    value: [
+                        message.get('source'),
+                        message.get('sourceDevice'),
+                        message.get('sent_at')
+                    ]
+                }
+            };
 
+            fetcher.fetch(options).always(function() {
+                if (fetcher.get('id')) {
+                    return resolve(true);
+                }
+
+                return resolve(false);
+            });
+        }).catch(function(error) {
+            console.log('isMessageDuplicate error:', error && error.stack ? error.stack : error);
+            return false;
+        });
+    }
+
+    function initIncomingMessage(data) {
         var message = new Whisper.Message({
-            source         : source,
-            sent_at        : timestamp,
-            received_at    : now,
-            conversationId : source,
+            source         : data.source,
+            sourceDevice   : data.sourceDevice,
+            sent_at        : data.timestamp,
+            received_at    : data.receivedAt || Date.now(),
+            conversationId : data.source,
             type           : 'incoming',
             unread         : 1
         });
@@ -213,18 +294,18 @@
     }
 
     function onError(ev) {
-        var e = ev.error;
-        console.log(e);
-        console.log(e.stack);
+        var error = ev.error;
+        console.log(error);
+        console.log(error.stack);
 
-        if (e.name === 'HTTPError' && (e.code == 401 || e.code == 403)) {
+        if (error.name === 'HTTPError' && (error.code == 401 || error.code == 403)) {
             Whisper.Registration.remove();
             Whisper.events.trigger('unauthorized');
             extension.install(isDevelopment ? 'standalone' : undefined);
             return;
         }
 
-        if (e.name === 'HTTPError' && e.code == -1) {
+        if (error.name === 'HTTPError' && error.code == -1) {
             // Failed to connect to server
             if (navigator.onLine) {
                 console.log('retrying in 1 minute');
@@ -240,15 +321,20 @@
         }
 
         if (ev.proto) {
-            if (e.name === 'MessageCounterError') {
+            if (error.name === 'MessageCounterError') {
+                if (ev.confirm) {
+                    ev.confirm();
+                }
                 // Ignore this message. It is likely a duplicate delivery
                 // because the server lost our ack the first time.
                 return;
             }
             var envelope = ev.proto;
-            var message = initIncomingMessage(envelope.source, envelope.timestamp.toNumber());
-            message.saveErrors(e).then(function() {
-                ConversationController.findOrCreatePrivateById(message.get('conversationId')).then(function(conversation) {
+            var message = initIncomingMessage(envelope);
+
+            return message.saveErrors(error).then(function() {
+                var id = message.get('conversationId');
+                return ConversationController.findOrCreateById(id, 'private').then(function(conversation) {
                     conversation.set({
                         active_at: Date.now(),
                         unreadCount: conversation.get('unreadCount') + 1
@@ -259,26 +345,90 @@
                     if (!conversation_timestamp || message_timestamp > conversation_timestamp) {
                         conversation.set({ timestamp: message.get('sent_at') });
                     }
-                    conversation.save();
+
                     conversation.trigger('newmessage', message);
-                    conversation.notify(message);
+                    if (initialLoadComplete) {
+                        conversation.notify(message);
+                    }
+
+                    if (ev.confirm) {
+                        ev.confirm();
+                    }
+
+                    return new Promise(function(resolve, reject) {
+                        conversation.save().then(resolve, reject);
+                    });
                 });
             });
-            return;
         }
 
-        throw e;
+        throw error;
     }
 
     function onReadReceipt(ev) {
         var read_at   = ev.timestamp;
         var timestamp = ev.read.timestamp;
         var sender    = ev.read.sender;
-        console.log('read receipt ', sender, timestamp);
-        Whisper.ReadReceipts.add({
+        console.log('read receipt', sender, timestamp);
+
+        var receipt = Whisper.ReadReceipts.add({
             sender    : sender,
             timestamp : timestamp,
             read_at   : read_at
+        });
+
+        receipt.on('remove', ev.confirm);
+
+        // Calling this directly so we can wait for completion
+        return Whisper.ReadReceipts.onReceipt(receipt);
+    }
+
+    function onVerified(ev) {
+        var number   = ev.verified.destination;
+        var key      = ev.verified.identityKey;
+        var state;
+
+        var c = new Whisper.Conversation({
+            id: number
+        });
+        var error = c.validateNumber();
+        if (error) {
+            console.log(
+                'Invalid verified sync received',
+                error && error.stack ? error.stack : error
+            );
+            return;
+        }
+
+        switch(ev.verified.state) {
+            case textsecure.protobuf.Verified.State.DEFAULT:
+                state = 'DEFAULT';
+                break;
+            case textsecure.protobuf.Verified.State.VERIFIED:
+                state = 'VERIFIED';
+                break;
+            case textsecure.protobuf.Verified.State.UNVERIFIED:
+                state = 'UNVERIFIED';
+                break;
+        }
+
+        console.log('got verified sync for', number, state,
+            ev.viaContactSync ? 'via contact sync' : '');
+
+        return ConversationController.findOrCreateById(number, 'private').then(function(contact) {
+            var options = {
+                viaSyncMessage: true,
+                viaContactSync: ev.viaContactSync,
+                key: key
+            };
+
+            if (state === 'VERIFIED') {
+                return contact.setVerified(options).then(ev.confirm);
+            } else if (state === 'DEFAULT') {
+                return contact.setVerifiedDefault(options).then(ev.confirm);
+            } else {
+                return contact.setUnverified(options).then(ev.confirm);
+            }
         });
     }
 
@@ -291,20 +441,29 @@
             timestamp
         );
 
-        Whisper.DeliveryReceipts.add({
-            timestamp: timestamp, source: pushMessage.source
+        var receipt = Whisper.DeliveryReceipts.add({
+            timestamp: timestamp,
+            source: pushMessage.source
         });
+
+        receipt.on('remove', ev.confirm);
+
+        // Calling this directly so we can wait for completion
+        return Whisper.DeliveryReceipts.onReceipt(receipt);
     }
 
     window.owsDesktopApp = {
         getAppView: function(destWindow) {
-
             var self = this;
 
             return ConversationController.updateInbox().then(function() {
                 try {
                     if (self.inboxView) { self.inboxView.remove(); }
-                    self.inboxView = new Whisper.InboxView({model: self, window: destWindow});
+                    self.inboxView = new Whisper.InboxView({
+                        model: self,
+                        window: destWindow,
+                        initialLoadComplete: initialLoadComplete
+                    });
                     self.openConversation(getOpenConversation());
 
                     return self.inboxView;

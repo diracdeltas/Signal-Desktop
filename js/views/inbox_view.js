@@ -60,6 +60,21 @@
         }
     });
 
+
+    Whisper.AppLoadingScreen = Whisper.View.extend({
+        templateName: 'app-loading-screen',
+        className: 'app-loading-screen',
+        updateProgress: function(count) {
+            if (count > 0) {
+                var message = i18n('loadingMessages', count.toString());
+                this.$('.message').text(message);
+            }
+        },
+        render_attributes: {
+            message: i18n('loading')
+        }
+    });
+
     Whisper.InboxView = Whisper.View.extend({
         templateName: 'two-column',
         className: 'inbox',
@@ -71,6 +86,9 @@
                     .addClass(theme);
         },
         initialize: function (options) {
+            options = options || {};
+
+            this.ready = false;
             this.render();
             this.applyTheme();
             this.$el.attr('tabindex', '1');
@@ -79,6 +97,13 @@
                 el: this.$('.conversation-stack'),
                 model: { window: options.window }
             });
+
+            if (!options.initialLoadComplete) {
+                this.appLoadingScreen = new Whisper.AppLoadingScreen();
+                this.appLoadingScreen.render();
+                this.appLoadingScreen.$el.prependTo(this.el);
+                this.startConnectionListener();
+            }
 
             var inboxCollection = getInboxCollection();
 
@@ -145,6 +170,40 @@
             'input input.search': 'filterContacts',
             'click .restart-signal': 'reloadBackgroundPage',
             'show .lightbox': 'showLightbox'
+        },
+        startConnectionListener: function() {
+            this.interval = setInterval(function() {
+                var status = window.getSocketStatus();
+                switch(status) {
+                    case WebSocket.CONNECTING:
+                        break;
+                    case WebSocket.OPEN:
+                        clearInterval(this.interval);
+                        // if we've connected, we can wait for real empty event
+                        this.interval = null;
+                        break;
+                    case WebSocket.CLOSING:
+                    case WebSocket.CLOSED:
+                        clearInterval(this.interval);
+                        this.interval = null;
+                        // if we failed to connect, we pretend we got an empty event
+                        this.onEmpty();
+                        break;
+                }
+            }.bind(this), 1000);
+        },
+        onEmpty: function() {
+            var view = this.appLoadingScreen;
+            if (view) {
+                this.appLoadingScreen = null;
+                view.remove();
+            }
+        },
+        onProgress: function(count) {
+            var view = this.appLoadingScreen;
+            if (view) {
+                view.updateProgress(count);
+            }
         },
         focusConversation: function(e) {
             if (e && this.$(e.target).closest('.placeholder').length) {

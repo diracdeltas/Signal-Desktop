@@ -57,6 +57,26 @@
         }
     });
 
+    Whisper.ConversationLoadingScreen = Whisper.View.extend({
+        templateName: 'conversation-loading-screen',
+        className: 'conversation-loading-screen'
+    });
+
+    Whisper.ConversationTitleView = Whisper.View.extend({
+        templateName: 'conversation-title',
+        initialize: function() {
+            this.listenTo(this.model, 'change', this.render);
+        },
+        render_attributes: function() {
+            return {
+                isVerified: this.model.isVerified(),
+                verified: i18n('verified'),
+                name: this.model.getName(),
+                number: this.model.getNumber(),
+            };
+        }
+    });
+
     Whisper.ConversationView = Whisper.View.extend({
         className: function() {
             return [ 'conversation', this.model.get('type') ].join(' ');
@@ -68,13 +88,12 @@
         render_attributes: function() {
             return {
                 group: this.model.get('type') === 'group',
-                name: this.model.getName(),
-                number: this.model.getNumber(),
+                isMe: this.model.isMe(),
                 avatar: this.model.getAvatar(),
                 expireTimer: this.model.get('expireTimer'),
-                'view-members'    : i18n('members'),
+                'show-members'    : i18n('showMembers'),
                 'end-session'     : i18n('resetSession'),
-                'verify-identity' : i18n('verifySafetyNumbers'),
+                'show-identity'   : i18n('showSafetyNumber'),
                 'destroy'         : i18n('deleteMessages'),
                 'send-message'    : i18n('sendMessage'),
                 'disappearing-messages': i18n('disappearingMessages'),
@@ -84,16 +103,31 @@
         },
         initialize: function(options) {
             this.listenTo(this.model, 'destroy', this.stopListening);
+            this.listenTo(this.model, 'change:verified', this.onVerifiedChange);
             this.listenTo(this.model, 'change:color', this.updateColor);
-            this.listenTo(this.model, 'change:name', this.updateTitle);
             this.listenTo(this.model, 'newmessage', this.addMessage);
             this.listenTo(this.model, 'delivered', this.updateMessage);
             this.listenTo(this.model, 'opened', this.onOpened);
             this.listenTo(this.model, 'expired', this.onExpired);
+            this.listenTo(this.model, 'prune', this.onPrune);
             this.listenTo(this.model.messageCollection, 'expired', this.onExpiredCollection);
 
+            this.lazyUpdateVerified = _.debounce(
+                this.model.updateVerified.bind(this.model),
+                1000 // one second
+            );
+            this.throttledGetProfiles = _.throttle(
+                this.model.getProfiles.bind(this.model),
+                1000 * 60 * 5 // five minutes
+            );
+
             this.render();
-            new TimerMenuView({ el: this.$('.timer-menu'), model: this.model });
+
+            this.loadingScreen = new Whisper.ConversationLoadingScreen();
+            this.loadingScreen.render();
+            this.loadingScreen.$el.prependTo(this.el);
+
+            this.timerMenu = new TimerMenuView({ el: this.$('.timer-menu'), model: this.model });
 
             emoji_util.parse(this.$('.conversation-name'));
 
@@ -102,6 +136,12 @@
                 el: this.$('form.send'),
                 window: this.window
             });
+
+            this.titleView = new Whisper.ConversationTitleView({
+                el: this.$('.conversation-title'),
+                model: this.model
+            });
+            this.titleView.render();
 
             this.view = new Whisper.MessageListView({
                 collection: this.model.messageCollection,
@@ -112,22 +152,18 @@
 
             this.$messageField = this.$('.send-message');
 
-            var onResize = this.forceUpdateMessageFieldSize.bind(this);
-            this.window.addEventListener('resize', onResize);
+            this.onResize = this.forceUpdateMessageFieldSize.bind(this);
+            this.window.addEventListener('resize', this.onResize);
 
-            var onFocus = function() {
+            this.onFocus = function() {
                 if (this.$el.css('display') !== 'none') {
                     this.markRead();
                 }
             }.bind(this);
-            this.window.addEventListener('focus', onFocus);
+            this.window.addEventListener('focus', this.onFocus);
 
             extension.windows.onClosed(function () {
-                this.window.removeEventListener('resize', onResize);
-                this.window.removeEventListener('focus', onFocus);
-                window.autosize.destroy(this.$messageField);
-                this.remove();
-                this.model.messageCollection.reset([]);
+                this.unload('windows closed');
             }.bind(this));
 
             this.fetchMessages();
@@ -137,15 +173,15 @@
         },
 
         events: {
-            'submit .send': 'sendMessage',
+            'submit .send': 'checkUnverifiedSendMessage',
             'input .send-message': 'updateMessageFieldSize',
             'keydown .send-message': 'updateMessageFieldSize',
             'click .destroy': 'destroyMessages',
             'click .end-session': 'endSession',
             'click .leave-group': 'leaveGroup',
             'click .update-group': 'newGroupUpdate',
-            'click .verify-identity': 'verifyIdentity',
-            'click .view-members': 'viewMembers',
+            'click .show-identity': 'showSafetyNumber',
+            'click .show-members': 'showMembers',
             'click .conversation-menu .hamburger': 'toggleMenu',
             'click .openInbox' : 'openInbox',
             'click' : 'onClick',
@@ -165,8 +201,149 @@
             'close .menu': 'closeMenu',
             'select .message-list .entry': 'messageDetail',
             'force-resize': 'forceUpdateMessageFieldSize',
-            'verify-identity': 'verifyIdentity'
+            'show-identity': 'showSafetyNumber'
         },
+
+        onPrune: function() {
+            if (!this.model.messageCollection.length || !this.lastActivity) {
+                return;
+            }
+
+            var oneHourAgo = Date.now() - 60 * 60 * 1000;
+            if (this.isHidden() && this.lastActivity < oneHourAgo) {
+                this.unload('inactivity');
+            } else if (this.view.atBottom()) {
+                this.trim();
+            }
+        },
+
+        unload: function(reason) {
+            console.log('unloading conversation', this.model.id, 'due to:', reason);
+
+            this.timerMenu.remove();
+            this.fileInput.remove();
+            this.titleView.remove();
+
+            if (this.captureAudioView) {
+                this.captureAudioView.remove();
+            }
+            if (this.banner) {
+                this.banner.remove();
+            }
+            if (this.lastSeenIndicator) {
+                this.lastSeenIndicator.remove();
+            }
+            if (this.scrollDownButton) {
+                this.scrollDownButton.remove();
+            }
+            if (this.panels && this.panels.length) {
+                for (var i = 0, max = this.panels.length; i < max; i += 1) {
+                    var panel = this.panels[i];
+                    panel.remove();
+                }
+            }
+
+            this.window.removeEventListener('resize', this.onResize);
+            this.window.removeEventListener('focus', this.onFocus);
+
+            window.autosize.destroy(this.$messageField);
+
+            this.view.remove();
+
+            this.remove();
+
+            this.model.messageCollection.forEach(function(model) {
+                model.trigger('unload');
+            });
+            this.model.messageCollection.reset([]);
+        },
+
+        trim: function() {
+            var MAX = 100;
+            var toRemove = this.model.messageCollection.length - MAX;
+            if (toRemove <= 0) {
+                return;
+            }
+
+            var models = [];
+            for (var i = 0; i < toRemove; i += 1) {
+                var model = this.model.messageCollection.at(i);
+                models.push(model);
+            }
+
+            if (!models.length) {
+                return;
+            }
+
+            console.log('trimming conversation', this.model.id, 'of', models.length, 'old messages');
+
+            this.model.messageCollection.remove(models);
+            _.forEach(models, function(model) {
+                model.trigger('unload');
+            });
+        },
+
+        markAllAsVerifiedDefault: function(unverified) {
+            return Promise.all(unverified.map(function(contact) {
+                if (contact.isUnverified()) {
+                    return contact.setVerifiedDefault();
+                }
+            }.bind(this)));
+        },
+
+
+        markAllAsApproved: function(untrusted) {
+            return Promise.all(untrusted.map(function(contact) {
+                return contact.setApproved();
+            }.bind(this)));
+        },
+
+        openSafetyNumberScreens: function(unverified) {
+            if (unverified.length === 1) {
+                this.showSafetyNumber(null, unverified.at(0));
+                return;
+            }
+
+            this.showMembers(null, unverified, {needVerify: true});
+        },
+
+        onVerifiedChange: function() {
+            if (this.model.isUnverified()) {
+                var unverified = this.model.getUnverified();
+                var message;
+                if (!unverified.length) {
+                    return;
+                }
+                if (unverified.length > 1) {
+                    message = i18n('multipleNoLongerVerified');
+                } else {
+                    message = i18n('noLongerVerified', unverified.at(0).getTitle());
+                }
+
+                // Need to re-add, since unverified set may have changed
+                if (this.banner) {
+                    this.banner.remove();
+                    this.banner = null;
+                }
+
+                this.banner = new Whisper.BannerView({
+                    message: message,
+                    onDismiss: function() {
+                        this.markAllAsVerifiedDefault(unverified);
+                    }.bind(this),
+                    onClick: function() {
+                        this.openSafetyNumberScreens(unverified);
+                    }.bind(this)
+                });
+
+                var container = this.$('.discussion-container');
+                container.append(this.banner.el);
+            } else if (this.banner) {
+                this.banner.remove();
+                this.banner = null;
+            }
+        },
+
         enableDisappearingMessages: function() {
             if (!this.model.get('expireTimer')) {
                 this.model.updateExpirationTimer(
@@ -190,10 +367,18 @@
         },
         captureAudio: function(e) {
             e.preventDefault();
-            var view = new Whisper.RecorderView().render();
+
+            if (this.captureAudioView) {
+                this.captureAudioView.remove();
+                this.captureAudioView = null;
+            }
+
+            var view = this.captureAudioView = new Whisper.RecorderView();
+            view.render();
             view.on('send', this.handleAudioCapture.bind(this));
             view.on('closed', this.endCaptureAudio.bind(this));
             view.$el.appendTo(this.$('.capture-audio'));
+
             this.$('.send-message').attr('disabled','disabled');
             this.$('.microphone').hide();
         },
@@ -206,6 +391,7 @@
         endCaptureAudio: function() {
             this.$('.send-message').removeAttr('disabled');
             this.$('.microphone').show();
+            this.captureAudioView = null;
         },
 
         unfocusBottomBar: function() {
@@ -220,6 +406,7 @@
             //   of messages are added to the DOM, one by one, changing window size and
             //   generating scroll events.
             if (!this.isHidden() && window.isFocused() && !this.inProgressFetch) {
+                this.lastActivity = Date.now();
                 this.markRead();
             }
         },
@@ -229,7 +416,39 @@
             setTimeout(this.markRead.bind(this), 1);
         },
 
+        onLoaded: function () {
+            var view = this.loadingScreen;
+            if (view) {
+                var openDelta = Date.now() - this.openStart;
+                console.log('Conversation', this.model.id, 'took', openDelta, 'milliseconds to load');
+                this.loadingScreen = null;
+                view.remove();
+            }
+        },
+
         onOpened: function() {
+            this.openStart = Date.now();
+            this.lastActivity = Date.now();
+
+            this.statusFetch = this.throttledGetProfiles().then(function() {
+                return this.model.updateVerified().then(function() {
+                    this.onVerifiedChange();
+                    this.statusFetch = null;
+                    console.log('done with status fetch');
+                }.bind(this));
+            }.bind(this));
+
+            // We schedule our catch-up decrypt right after any in-progress fetch of
+            //   messages from the database, then ensure that the loading screen is only
+            //   dismissed when that is complete.
+            var messagesLoaded = this.inProgressFetch || Promise.resolve();
+            messagesLoaded = messagesLoaded.then(function() {
+                return this.model.decryptOldIncomingKeyErrors();
+            }.bind(this));
+
+            Promise.all([this.statusFetch, messagesLoaded])
+                .then(this.onLoaded.bind(this), this.onLoaded.bind(this));
+
             this.view.resetScrollPosition();
             this.$el.trigger('force-resize');
             this.focusMessageField();
@@ -264,15 +483,17 @@
 
         removeScrollDownButton: function() {
             if (this.scrollDownButton) {
-                this.scrollDownButton.remove();
+                var button = this.scrollDownButton;
                 this.scrollDownButton = null;
+                button.remove();
             }
         },
 
         removeLastSeenIndicator: function() {
             if (this.lastSeenIndicator) {
-                this.lastSeenIndicator.remove();
+                var indicator = this.lastSeenIndicator;
                 this.lastSeenIndicator = null;
+                indicator.remove();
             }
         },
 
@@ -295,14 +516,25 @@
             options = options || {};
             _.defaults(options, {scroll: true});
 
-            var oldestUnread = this.model.messageCollection.find(function(model) {
-                return model.get('unread');
+            var unreadCount = 0;
+            var oldestUnread = null;
+
+            // We need to iterate here because unseen non-messages do not contribute to
+            //   the badge number, but should be reflected in the indicator's count.
+            this.model.messageCollection.forEach(function(model) {
+                if (!model.get('unread')) {
+                    return;
+                }
+
+                unreadCount += 1;
+                if (!oldestUnread) {
+                    oldestUnread = model;
+                }
             });
-            var unreadCount = this.model.get('unreadCount');
 
             this.removeLastSeenIndicator();
 
-            if (oldestUnread && unreadCount > 0) {
+            if (oldestUnread) {
                 this.lastSeenIndicator = new Whisper.LastSeenIndicatorView({count: unreadCount});
                 var lastSeenEl = this.lastSeenIndicator.render().$el;
 
@@ -313,7 +545,7 @@
                 }
 
                 // scrollIntoView is an async operation, but we have no way to listen for
-                // completion of the resultant scroll.
+                //   completion of the resultant scroll.
                 setTimeout(function() {
                     if (!this.view.atBottom()) {
                         this.addScrollDownButtonWithCount(unreadCount);
@@ -323,6 +555,7 @@
         },
 
         focusMessageField: function() {
+            this.$messageField.prop('disabled', false);
             this.$messageField.focus();
         },
 
@@ -361,8 +594,10 @@
                     });
                     this.inProgressFetch = null;
                 }.bind(this));
+            }.bind(this)).catch(function(error) {
+                console.log('fetchMessages error:', error && error.stack ? error.stack : error);
+                this.inProgressFetch = null;
             }.bind(this));
-            // TODO catch?
 
             return this.inProgressFetch;
         },
@@ -379,6 +614,9 @@
         },
 
         addMessage: function(message) {
+            // This is debounced, so it won't hit the database too often.
+            this.lazyUpdateVerified();
+
             this.model.messageCollection.add(message, {merge: true});
             message.setToExpire();
 
@@ -414,38 +652,32 @@
             this.model.messageCollection.add(message, {merge: true});
         },
 
-        viewMembers: function() {
-            return this.model.fetchContacts().then(function() {
-                var view = new Whisper.GroupMemberList({ model: this.model });
-                this.listenBack(view);
-            }.bind(this));
-        },
-
         openInbox: function() {
             openInbox();
         },
 
         onClick: function(e) {
-            this.closeMenu(e);
-            this.markRead();
+            // If there are sub-panels open, we don't want to respond to clicks
+            if (!this.panels || !this.panels.length) {
+                this.closeMenu(e);
+                this.markRead();
+            }
         },
 
         findNewestVisibleUnread: function() {
             var collection = this.model.messageCollection;
             var length = collection.length;
             var viewportBottom = this.view.outerHeight;
-            var unreadCount = this.model.get('unreadCount');
-
-            if (!unreadCount || unreadCount < 1) {
-                return;
-            }
+            var unreadCount = this.model.get('unreadCount') || 0;
 
             // Start with the most recent message, search backwards in time
             var foundUnread = 0;
             for (var i = length - 1; i >= 0; i -= 1) {
-                // We don't want to search through all messages, so we stop after we've
-                //   hit all unread messages. The unread should be relatively recent.
-                if (foundUnread >= unreadCount) {
+                // Search the latest 30, then stop if we believe we've covered all known
+                //   unread messages. The unread should be relatively recent.
+                // Why? local notifications can be unread but won't be reflected the
+                //   conversation's unread count.
+                if (i > 30 && foundUnread >= unreadCount) {
                     return;
                 }
 
@@ -491,7 +723,23 @@
             }
         },
 
-        verifyIdentity: function(ev, model) {
+        showMembers: function(e, members, options) {
+            options = options || {};
+            _.defaults(options, {needVerify: false});
+
+            members = members || this.model.contactCollection;
+
+            var view = new Whisper.GroupMemberList({
+                model: members,
+                // we pass this in to allow nested panels
+                listenBack: this.listenBack.bind(this),
+                needVerify: options.needVerify
+            });
+
+            this.listenBack(view);
+        },
+
+        showSafetyNumber: function(e, model) {
             if (!model && this.model.isPrivate()) {
                 model = this.model;
             }
@@ -506,23 +754,51 @@
         messageDetail: function(e, data) {
             var view = new Whisper.MessageDetailView({
                 model: data.message,
-                conversation: this.model
+                conversation: this.model,
+                // we pass these in to allow nested panels
+                listenBack: this.listenBack.bind(this),
+                resetPanel: this.resetPanel.bind(this)
             });
             this.listenBack(view);
             view.render();
         },
 
+        // not currently in use
+        newGroupUpdate: function() {
+            var view = new Whisper.NewGroupUpdateView({
+                model: this.model,
+                window: this.window
+            });
+            view.render();
+            this.listenBack(view);
+        },
+
         listenBack: function(view) {
-            this.panel = view;
-            this.$('.main.panel, .header-buttons.right').hide();
-            this.$('.back').show();
-            view.$el.insertBefore(this.$('.panel'));
+            this.panels = this.panels || [];
+            if (this.panels.length > 0) {
+                this.panels[0].$el.hide();
+            }
+            this.panels.unshift(view);
+
+            if (this.panels.length === 1) {
+                this.$('.main.panel, .header-buttons.right').hide();
+                this.$('.back').show();
+            }
+
+            view.$el.insertBefore(this.$('.panel').first());
         },
         resetPanel: function() {
-            this.panel.remove();
-            this.$('.main.panel, .header-buttons.right').show();
-            this.$('.back').hide();
-            this.$el.trigger('force-resize');
+            var view = this.panels.shift();
+            if (this.panels.length > 0) {
+                this.panels[0].$el.show();
+            }
+            view.remove();
+
+            if (this.panels.length === 0) {
+                this.$('.main.panel, .header-buttons.right').show();
+                this.$('.back').hide();
+                this.$el.trigger('force-resize');
+            }
         },
 
         closeMenu: function(e) {
@@ -548,14 +824,6 @@
             this.$('.conversation-menu .menu-list').toggle();
         },
 
-        newGroupUpdate: function() {
-            this.newGroupUpdateView = new Whisper.NewGroupUpdateView({
-                model: this.model,
-                window: this.window
-            });
-            this.listenBack(this.newGroupUpdateView);
-        },
-
         destroyMessages: function(e) {
             this.confirm(i18n('deleteConversationConfirmation')).then(function() {
                 this.model.destroyMessages();
@@ -564,6 +832,96 @@
                 // clicked cancel, nothing to do.
             });
             this.$('.menu-list').hide();
+        },
+
+        showSendConfirmationDialog: function(e, contacts) {
+            var message;
+            var isUnverified = this.model.isUnverified();
+
+            if (contacts.length > 1) {
+                if (isUnverified) {
+                    message = i18n('changedSinceVerifiedMultiple');
+                } else {
+                    message = i18n('changedRecentlyMultiple');
+                }
+            } else {
+                if (isUnverified) {
+                    message = i18n('changedSinceVerified', contacts.at(0).getTitle());
+                } else {
+                    message = i18n('changedRecently', contacts.at(0).getTitle());
+                }
+            }
+
+            var dialog = new Whisper.ConfirmationDialogView({
+                message: message,
+                okText: i18n('sendAnyway'),
+                resolve: function() {
+                    this.checkUnverifiedSendMessage(e, {force: true});
+                }.bind(this),
+                reject: function() {
+                    this.focusMessageField();
+                }.bind(this)
+            });
+
+            this.$el.prepend(dialog.el);
+            dialog.focusCancel();
+        },
+
+        checkUnverifiedSendMessage: function(e, options) {
+            e.preventDefault();
+            this.sendStart = Date.now();
+            this.$messageField.prop('disabled', true);
+
+            options = options || {};
+            _.defaults(options, {force: false});
+
+            // This will go to the trust store for the latest identity key information,
+            //   and may result in the display of a new banner for this conversation.
+            this.model.updateVerified().then(function() {
+                var contacts = this.model.getUnverified();
+                if (!contacts.length) {
+                    return this.checkUntrustedSendMessage(e, options);
+                }
+
+                if (options.force) {
+                    return this.markAllAsVerifiedDefault(contacts).then(function() {
+                        this.checkUnverifiedSendMessage(e, options);
+                    }.bind(this));
+                }
+
+                this.showSendConfirmationDialog(e, contacts);
+            }.bind(this)).catch(function(error) {
+                this.focusMessageField();
+                console.log(
+                    'checkUnverifiedSendMessage error:',
+                    error && error.stack ? error.stack : error
+                );
+            }.bind(this));
+        },
+
+        checkUntrustedSendMessage: function(e, options) {
+            options = options || {};
+            _.defaults(options, {force: false});
+
+            this.model.getUntrusted().then(function(contacts) {
+                if (!contacts.length) {
+                    return this.sendMessage(e);
+                }
+
+                if (options.force) {
+                    return this.markAllAsApproved(contacts).then(function() {
+                        this.sendMessage(e);
+                    }.bind(this));
+                }
+
+                this.showSendConfirmationDialog(e, contacts);
+            }.bind(this)).catch(function(error) {
+                this.focusMessageField();
+                console.log(
+                    'checkUntrustedSendMessage error:',
+                    error && error.stack ? error.stack : error
+                );
+            }.bind(this));
         },
 
         sendMessage: function(e) {
@@ -583,20 +941,28 @@
             if (toast) {
                 toast.$el.insertAfter(this.$el);
                 toast.render();
+                this.focusMessageField();
                 return;
             }
-            e.preventDefault();
+
             var input = this.$messageField;
             var message = this.replace_colons(input.val()).trim();
-            var convo = this.model;
 
             if (message.length > 0 || this.fileInput.hasFiles()) {
                 this.fileInput.getFiles().then(function(attachments) {
-                    convo.sendMessage(message, attachments);
-                });
-                input.val("");
-                this.forceUpdateMessageFieldSize(e);
-                this.fileInput.deleteFiles();
+                    var sendDelta = Date.now() - this.sendStart;
+                    console.log('Send pre-checks took', sendDelta, 'milliseconds');
+                    this.model.sendMessage(message, attachments);
+                    input.val("");
+                    this.focusMessageField();
+                    this.forceUpdateMessageFieldSize(e);
+                    this.fileInput.deleteFiles();
+                }.bind(this)).catch(function() {
+                    console.log('Error pulling attached files before send');
+                    this.focusMessageField();
+                }.bind(this));
+            } else {
+                this.focusMessageField();
             }
         },
 
@@ -610,10 +976,6 @@
                     return m;
                 }
             });
-        },
-
-        updateTitle: function() {
-            this.$('.conversation-title').text(this.model.getTitle());
         },
 
         updateColor: function(model, color) {

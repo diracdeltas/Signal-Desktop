@@ -9,20 +9,69 @@
         className: 'contact-detail',
         templateName: 'contact-detail',
         initialize: function(options) {
-            this.conflict = options.conflict;
-            this.errors = _.reject(options.errors, function(e) {
-                return (e.name === 'IncomingIdentityKeyError' ||
-                        e.name === 'OutgoingIdentityKeyError' ||
-                        e.name === 'OutgoingMessageError' ||
-                        e.name === 'SendMessageNetworkError');
-            });
+            this.listenBack = options.listenBack;
+            this.resetPanel = options.resetPanel;
+            this.message = options.message;
 
+            var newIdentity = i18n('newIdentity');
+            this.errors = _.map(options.errors, function(error) {
+                if (error.name === 'OutgoingIdentityKeyError') {
+                    error.message = newIdentity;
+                }
+                return error;
+            });
+            this.outgoingKeyError = _.find(this.errors, function(error) {
+                return error.name === 'OutgoingIdentityKeyError';
+            });
+        },
+        events: {
+            'click': 'onClick'
+        },
+        onClick: function() {
+            if (this.outgoingKeyError) {
+                var view = new Whisper.IdentityKeySendErrorPanelView({
+                    model: this.model,
+                    listenBack: this.listenBack,
+                    resetPanel: this.resetPanel
+                });
+
+                this.listenTo(view, 'send-anyway', this.onSendAnyway);
+
+                view.render();
+
+                this.listenBack(view);
+                view.$('.cancel').focus();
+            }
+        },
+        forceSend: function() {
+            this.model.updateVerified().then(function() {
+                if (this.model.isUnverified()) {
+                    return this.model.setVerifiedDefault();
+                }
+            }.bind(this)).then(function() {
+                return this.model.isUntrusted();
+            }.bind(this)).then(function(untrusted) {
+                if (untrusted) {
+                    return this.model.setApproved();
+                }
+            }.bind(this)).then(function() {
+                this.message.resend(this.outgoingKeyError.number);
+            }.bind(this));
+        },
+        onSendAnyway: function() {
+            if (this.outgoingKeyError) {
+                this.forceSend();
+            }
         },
         render_attributes: function() {
+            var showButton = Boolean(this.outgoingKeyError);
+
             return {
-                name     : this.model.getTitle(),
-                avatar   : this.model.getAvatar(),
-                errors   : this.errors
+                name             : this.model.getTitle(),
+                avatar           : this.model.getAvatar(),
+                errors           : this.errors,
+                showErrorButton  : showButton,
+                errorButtonLabel : i18n('view')
             };
         }
     });
@@ -31,11 +80,37 @@
         className: 'message-detail panel',
         templateName: 'message-detail',
         initialize: function(options) {
+            this.listenBack = options.listenBack;
+            this.resetPanel = options.resetPanel;
+
             this.view = new Whisper.MessageView({model: this.model});
             this.view.render();
             this.conversation = options.conversation;
 
             this.listenTo(this.model, 'change', this.render);
+        },
+        events: {
+            'click button.delete': 'onDelete'
+        },
+        onDelete: function() {
+            var dialog = new Whisper.ConfirmationDialogView({
+                message: i18n('deleteWarning'),
+                okText: i18n('delete'),
+                resolve: function() {
+                    this.model.destroy();
+                    this.resetPanel();
+                }.bind(this)
+            });
+
+            this.$el.prepend(dialog.el);
+            dialog.focusCancel();
+        },
+        getContact: function(number) {
+            var c = ConversationController.get(number);
+            return {
+                number: number,
+                title: c ? c.getTitle() : number
+            };
         },
         contacts: function() {
             if (this.model.isIncoming()) {
@@ -48,52 +123,47 @@
         renderContact: function(contact) {
             var view = new ContactView({
                 model: contact,
-                errors: this.errors[contact.id]
+                errors: this.grouped[contact.id],
+                listenBack: this.listenBack,
+                resetPanel: this.resetPanel,
+                message: this.model
             }).render();
             this.$('.contacts').append(view.el);
-
-            var conflict = this.model.getKeyConflict(contact.id);
-            if (conflict) {
-                this.renderConflict(contact, conflict);
-            }
-        },
-        renderConflict: function(contact, conflict) {
-            var view = new Whisper.KeyConflictDialogueView({
-                model: conflict,
-                contact: contact,
-                conversation: this.conversation
-            });
-            this.$('.conflicts').append(view.el);
         },
         render: function() {
-            this.errors = _.groupBy(this.model.get('errors'), 'number');
-            var unknownErrors = this.errors['undefined'];
-            if (unknownErrors) {
-                unknownErrors = unknownErrors.filter(function(e) {
-                    return (e.name !== 'MessageError');
-                });
-            }
+            var errorsWithoutNumber = _.reject(this.model.get('errors'), function(error) {
+                return Boolean(error.number);
+            });
+
             this.$el.html(Mustache.render(_.result(this, 'template', ''), {
-                sent_at     : moment(this.model.get('sent_at')).format('LLLL'),
-                received_at : this.model.isIncoming() ? moment(this.model.get('received_at')).format('LLLL') : null,
-                tofrom      : this.model.isIncoming() ? i18n('from') : i18n('to'),
-                errors      : unknownErrors,
-                title       : i18n('messageDetail'),
-                sent        : i18n('sent'),
-                received    : i18n('received'),
-                errorLabel  : i18n('error'),
-                hasConflict : this.model.hasKeyConflicts()
+                sent_at         : moment(this.model.get('sent_at')).format('LLLL'),
+                received_at     : this.model.isIncoming() ? moment(this.model.get('received_at')).format('LLLL') : null,
+                tofrom          : this.model.isIncoming() ? i18n('from') : i18n('to'),
+                errors          : errorsWithoutNumber,
+                title           : i18n('messageDetail'),
+                sent            : i18n('sent'),
+                received        : i18n('received'),
+                errorLabel      : i18n('error'),
+                deleteLabel     : i18n('deleteMessage'),
+                retryDescription: i18n('retryDescription')
             }));
             this.view.$el.prependTo(this.$('.message-container'));
 
+            this.grouped = _.groupBy(this.model.get('errors'), 'number');
             if (this.model.isOutgoing()) {
-                this.conversation.contactCollection.reject(function(c) {
-                    return c.id === textsecure.storage.user.getNumber();
-                }).forEach(this.renderContact.bind(this));
+                var contacts = this.conversation.contactCollection.reject(function(c) {
+                    return c.isMe();
+                });
+
+                _.sortBy(contacts, function(c) {
+                    var prefix = this.grouped[c.id] ? '0' : '1';
+                    // this prefix ensures that contacts with errors are listed first;
+                    //   otherwise it's alphabetical
+                    return prefix + c.getTitle();
+                }.bind(this)).forEach(this.renderContact.bind(this));
             } else {
-                this.renderContact(
-                    this.conversation.contactCollection.get(this.model.get('source'))
-                );
+                var c = this.conversation.contactCollection.get(this.model.get('source'));
+                this.renderContact(c);
             }
         }
     });

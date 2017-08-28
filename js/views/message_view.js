@@ -20,13 +20,32 @@
         tagName: 'span',
         className: 'hasRetry',
         templateName: 'hasRetry',
+        render_attributes: function() {
+            var messageNotSent;
+
+            if (!this.model.someRecipientsFailed()) {
+                messageNotSent = i18n('messageNotSent');
+            }
+
+            return {
+                messageNotSent: messageNotSent,
+                resend: i18n('resend')
+            };
+        }
+    });
+    var SomeFailedView = Whisper.View.extend({
+        tagName: 'span',
+        className: 'some-failed',
+        templateName: 'some-failed',
         render_attributes: {
-            messageNotSent: i18n('messageNotSent'),
-            resend: i18n('resend')
+            someFailed: i18n('someRecipientsFailed')
         }
     });
     var TimerView = Whisper.View.extend({
         templateName: 'hourglass',
+        initialize: function() {
+            this.listenTo(this.model, 'unload', this.remove);
+        },
         update: function() {
             if (this.timeout) {
               clearTimeout(this.timeout);
@@ -58,6 +77,7 @@
         initialize: function() {
             this.conversation = this.model.getExpirationTimerUpdateSource();
             this.listenTo(this.conversation, 'change', this.render);
+            this.listenTo(this.model, 'unload', this.remove);
         },
         render_attributes: function() {
             var seconds = this.model.get('expirationTimerUpdate').expireTimer;
@@ -76,7 +96,7 @@
 
     Whisper.KeyChangeView = Whisper.View.extend({
         tagName:   'li',
-        className: 'keychange',
+        className: 'keychange advisory',
         templateName: 'keychange',
         id: function() {
             return this.model.id;
@@ -84,17 +104,64 @@
         initialize: function() {
             this.conversation = this.model.getModelForKeyChange();
             this.listenTo(this.conversation, 'change', this.render);
+            this.listenTo(this.model, 'unload', this.remove);
         },
         events: {
-            'click .content': 'verifyIdentity'
+            'click .content': 'showIdentity'
         },
         render_attributes: function() {
             return {
               content: this.model.getNotificationText()
             };
         },
-        verifyIdentity: function() {
-            this.$el.trigger('verify-identity', this.conversation);
+        showIdentity: function() {
+            this.$el.trigger('show-identity', this.conversation);
+        }
+    });
+
+    Whisper.VerifiedChangeView = Whisper.View.extend({
+        tagName:   'li',
+        className: 'verified-change advisory',
+        templateName: 'verified-change',
+        id: function() {
+            return this.model.id;
+        },
+        initialize: function() {
+            this.conversation = this.model.getModelForVerifiedChange();
+            this.listenTo(this.conversation, 'change', this.render);
+            this.listenTo(this.model, 'unload', this.remove);
+        },
+        events: {
+            'click .content': 'showIdentity'
+        },
+        render_attributes: function() {
+            var key;
+
+            if (this.model.get('verified')) {
+                if (this.model.get('local')) {
+                    key = 'youMarkedAsVerified';
+                } else {
+                    key = 'youMarkedAsVerifiedOtherDevice';
+                }
+                return {
+                    icon: 'verified',
+                    content: i18n(key, this.conversation.getTitle())
+                };
+            }
+
+            if (this.model.get('local')) {
+                key = 'youMarkedAsNotVerified';
+            } else {
+                key = 'youMarkedAsNotVerifiedOtherDevice';
+            }
+
+            return {
+                icon: 'shield',
+                content: i18n(key, this.conversation.getTitle())
+            };
+        },
+        showIdentity: function() {
+            this.$el.trigger('show-identity', this.conversation);
         }
     });
 
@@ -112,6 +179,7 @@
             this.listenTo(this.model, 'change', this.renderSent);
             this.listenTo(this.model, 'change:flags change:group_update', this.renderControl);
             this.listenTo(this.model, 'destroy', this.onDestroy);
+            this.listenTo(this.model, 'unload', this.onUnload);
             this.listenTo(this.model, 'expired', this.onExpired);
             this.listenTo(this.model, 'pending', this.renderPending);
             this.listenTo(this.model, 'done', this.renderDone);
@@ -127,6 +195,7 @@
             'click .error-icon': 'select',
             'click .timestamp': 'select',
             'click .status': 'select',
+            'click .some-failed': 'select',
             'click .error-message': 'select',
             'click .body a': 'openLink'
         },
@@ -151,11 +220,39 @@
             // Failsafe: if in the background, animation events don't fire
             setTimeout(this.remove.bind(this), 1000);
         },
+        onUnload: function() {
+            if (this.avatarView) {
+                this.avatarView.remove();
+            }
+            if (this.errorIconView) {
+                this.errorIconView.remove();
+            }
+            if (this.networkErrorView) {
+                this.networkErrorView.remove();
+            }
+            if (this.someFailedView) {
+                this.someFailedView.remove();
+            }
+            if (this.timeStampView) {
+                this.timeStampView.remove();
+            }
+            if (this.loadedAttachments && this.loadedAttachments.length) {
+                for (var i = 0, max = this.loadedAttachments.length; i < max; i += 1) {
+                    var view = this.loadedAttachments[i];
+                    view.unload();
+                }
+            }
+
+            // No need to handle this one, since it listens to 'unload' itself:
+            //   this.timerView
+
+            this.remove();
+        },
         onDestroy: function() {
             if (this.$el.hasClass('expired')) {
               return;
             }
-            this.remove();
+            this.onUnload();
         },
         select: function(e) {
             this.$el.trigger('select', {message: this.model});
@@ -187,19 +284,39 @@
         },
         renderErrors: function() {
             var errors = this.model.get('errors');
+
+
+            this.$('.error-icon-container').remove();
+            if (this.errorIconView) {
+                this.errorIconView.remove();
+                this.errorIconView = null;
+            }
             if (_.size(errors) > 0) {
                 if (this.model.isIncoming()) {
                     this.$('.content').text(this.model.getDescription()).addClass('error-message');
                 }
-                var view = new ErrorIconView({ model: errors[0] });
-                view.render().$el.appendTo(this.$('.bubble'));
-            } else {
-                this.$('.error-icon-container').remove();
+                this.errorIconView = new ErrorIconView({ model: errors[0] });
+                this.errorIconView.render().$el.appendTo(this.$('.bubble'));
+            }
+
+            this.$('.meta .hasRetry').remove();
+            if (this.networkErrorView) {
+                this.networkErrorView.remove();
+                this.networkErrorView = null;
             }
             if (this.model.hasNetworkError()) {
-                this.$('.meta').prepend(new NetworkErrorView().render().el);
-            } else {
-                this.$('.meta .hasRetry').remove();
+                this.networkErrorView = new NetworkErrorView({model: this.model});
+                this.$('.meta').prepend(this.networkErrorView.render().el);
+            }
+
+            this.$('.meta .some-failed').remove();
+            if (this.someFailedView) {
+                this.someFailedView.remove();
+                this.someFailedView = null;
+            }
+            if (this.model.someRecipientsFailed()) {
+                this.someFailedView = new SomeFailedView();
+                this.$('.meta').prepend(this.someFailedView.render().el);
             }
         },
         renderControl: function() {
@@ -258,11 +375,11 @@
             if (color) {
                 bubble.addClass(color);
             }
-            var avatarView = new (Whisper.View.extend({
+            this.avatarView = new (Whisper.View.extend({
                 templateName: 'avatar',
                 render_attributes: { avatar: model.getAvatar() }
             }))();
-            this.$('.avatar').replaceWith(avatarView.render().$('.avatar'));
+            this.$('.avatar').replaceWith(this.avatarView.render().$('.avatar'));
         },
         appendAttachmentView: function(view) {
             // We check for a truthy 'updated' here to ensure that a race condition in a

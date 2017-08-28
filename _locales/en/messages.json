@@ -1,4 +1,30 @@
 {
+    "loading": {
+      "message": "Loading...",
+      "description": "Message shown on the loading screen before we've loaded any messages"
+    },
+    "upgradingDatabase": {
+      "message": "Upgrading database. This may take some time...",
+      "description": "Message shown on the loading screen when we're changing database structure on first run of a new version"
+    },
+    "loadingMessages": {
+      "message": "Loading messages. $count$ so far...",
+      "description": "Message shown on the loading screen when we're catching up on the backlog of messages",
+      "placeholders": {
+        "count": {
+          "content": "$1",
+          "example": "5"
+        }
+      }
+    },
+    "me": {
+      "message": "Me",
+      "description": "The label for yourself when shown in a group member list"
+    },
+    "view": {
+      "message": "View",
+      "description": "Used as a label on a button allowing user to see more information"
+    },
     "youLeftTheGroup": {
       "message": "You left the group",
       "description": "Displayed when a user can't send a message because they have left the group"
@@ -28,6 +54,116 @@
           "example": "5"
         }
       }
+    },
+    "youMarkedAsVerified": {
+      "message": "You marked your safety number with $name$ as verified.",
+      "description": "Shown in the conversation history when the user marks a contact as verified.",
+      "placeholders": {
+        "name": {
+          "content": "$1",
+          "example": "Bob"
+        }
+      }
+    },
+    "youMarkedAsNotVerified": {
+      "message": "You marked your safety number with $name$ as unverified.",
+      "description": "Shown in the conversation history when the user marks a contact as not verified, whether on the safety number screen or by dismissing a banner or dialog.",
+      "placeholders": {
+        "name": {
+          "content": "$1",
+          "example": "Bob"
+        }
+      }
+    },
+    "youMarkedAsVerifiedOtherDevice": {
+      "message": "You marked your safety number with $name$ as verified from another device.",
+      "description": "Shown in the conversation history when we discover that the user marked a contact as verified on another device.",
+      "placeholders": {
+        "name": {
+          "content": "$1",
+          "example": "Bob"
+        }
+      }
+    },
+    "youMarkedAsNotVerifiedOtherDevice": {
+      "message": "You marked your safety number with $name$ as not verified from another device.",
+      "description": "Shown in the conversation history when we discover that the user marked a contact as not verified on another device.",
+      "placeholders": {
+        "name": {
+          "content": "$1",
+          "example": "Bob"
+        }
+      }
+    },
+    "membersNeedingVerification": {
+      "message": "Your safety numbers with these group members have changed since you last verified. Click a group member to see your new safety number with them.",
+      "description": "When there are multiple previously-verified group members with safety number changes, a banner will be shown. The list of contacts with safety number changes is shown, and this text introduces that list."
+    },
+    "changedSinceVerifiedMultiple": {
+      "message": "Your safety numbers with multiple group members have changed since you last verified. This could mean that someone is trying to intercept your communication or that they have simply reinstalled Signal.",
+      "description": "Shown on confirmation dialog when user attempts to send a message"
+    },
+    "changedSinceVerified": {
+      "message": "Your safety number with $name$ has changed since you last verified. This could mean that someone is trying to intercept your communication or that $name$ has simply reinstalled Signal.",
+      "description": "Shown on confirmation dialog when user attempts to send a message",
+      "placeholders": {
+        "name": {
+          "content": "$1",
+          "example": "Bob"
+        }
+      }
+    },
+    "changedRightAfterVerify": {
+      "message": "The safety number you are trying to verify has changed. Please review your new safety number with $name$. Remember, this change could mean that someone is trying to intercept your communication or that $name$ has simply reinstalled Signal.",
+      "description": "Shown on the safety number screen when the user has selected to verify/unverify a contact's safety number, and we immediately discover a safety number change",
+      "placeholders": {
+        "name": {
+          "content": "$1",
+          "example": "Bob"
+        }
+      }
+    },
+    "changedRecentlyMultiple": {
+      "message": "Your safety numbers with multiple group members have changed recently. This could mean that someone is trying to intercept your communication or that they have simply reinstalled Signal.",
+      "description": "Shown on confirmation dialog when user attempts to send a message"
+    },
+    "changedRecently": {
+      "message": "Your safety number with $name$ has changed recently. This could mean that someone is trying to intercept your communication or that $name$ has simply reinstalled Signal.",
+      "description": "Shown on confirmation dialog when user attempts to send a message",
+      "placeholders": {
+        "name": {
+          "content": "$1",
+          "example": "Bob"
+        }
+      }
+    },
+    "identityKeyErrorOnSend": {
+      "message": "Your safety number with $name$ has changed. This could either mean that someone is trying to intercept your communication or that $name$ has simply reinstalled Signal. You may wish to verify your saftey number with this contact.",
+      "description": "Shown when user clicks on a failed recipient in the message detail view after an identity key change",
+      "placeholders": {
+        "name": {
+          "content": "$1",
+          "example": "Bob"
+        }
+      }
+    },
+    "sendAnyway": {
+      "message": "Send Anyway",
+      "description": "Used on a warning dialog to make it clear that it might be risky to send the message."
+    },
+    "noLongerVerified": {
+      "message": "Your safety number with $name$ has changed and is no longer verified. Click to show.",
+      "description": "Shown in converation banner when user's safety number has changed, but they were previously verified.",
+      "placeholders": {
+        "name": {
+          "content": "$1",
+          "example": "Bob"
+        }
+      }
+    },
+    "multipleNoLongerVerified": {
+      "message": "Your safety numbers with multiple members of this group have changed and are no longer verified. Click to show.",
+      "description": "Shown in conversation banner when more than one group member's safety number has changed, but they were previously verified."
     },
     "debugLogExplanation": {
       "message": "This log will be posted publicly online for contributors to view. You may examine and edit it before submitting."
@@ -60,7 +196,33 @@
       "description": "Label for a button to accept a new safety number"
     },
     "verify": {
-      "message": "Verify"
+      "message": "Mark as verified"
+    },
+    "unverify": {
+      "message": "Mark as not verified"
+    },
+    "isVerified": {
+      "message": "You have verified your safety number with $name$.",
+      "description": "Summary state shown at top of the safety number screen if user has verified contact.",
+      "placeholders": {
+        "name": {
+          "content": "$1",
+          "example": "Bob"
+        }
+      }
+    },
+    "isNotVerified": {
+      "message": "You have not verified your safety number with $name$.",
+      "description": "Summary state shown at top of the safety number screen if user has not verified contact.",
+      "placeholders": {
+        "name": {
+          "content": "$1",
+          "example": "Bob"
+        }
+      }
+    },
+    "verified": {
+      "message": "Verified"
     },
     "newIdentity": {
       "message": "New safety number",
@@ -68,12 +230,6 @@
     },
     "identityChanged": {
       "message": "Your safety number with this contact has changed. This could either mean that someone is trying to intercept your communication, or this contact simply reinstalled Signal. You may wish to verify the new safety number below."
-    },
-    "outgoingKeyConflict": {
-      "message": "Your safety number with this contact has changed. Click to process and display."
-    },
-    "incomingKeyConflict": {
-      "message": "Received message with a new safety number. Click to process and display."
     },
     "incomingError": {
       "message": "Error handling incoming message."
@@ -158,6 +314,15 @@
     "messageDetail": {
         "message": "Message Detail"
     },
+    "delete": {
+      "message": "Delete"
+    },
+    "deleteWarning": {
+      "message": "Are you sure? Clicking 'delete' will permanently remove this message from this device."
+    },
+    "deleteMessage": {
+      "message": "Delete this message"
+    },
     "from": {
         "message": "From",
         "description": "Label for the sender of a message"
@@ -178,15 +343,27 @@
         "message": "Send a message",
         "description": "Placeholder text in the message entry field"
     },
-    "members": {
-      "message": "Members"
+    "groupMembers": {
+      "message": "Group members"
+    },
+    "showMembers": {
+      "message": "Show members"
     },
     "resetSession": {
         "message": "Reset session",
         "description": "This is a menu item for resetting the session, using the imperative case, as in a command."
     },
-    "verifySafetyNumbers": {
-        "message": "Verify safety number"
+    "showSafetyNumber": {
+      "message": "Show safety number"
+    },
+    "verifyHelp": {
+      "message": "If you wish to verify the security of your end-to-end encryption with $name$, compare the numbers above with the numbers on their device.",
+      "placeholders": {
+        "name": {
+          "content": "$1",
+          "example": "John"
+        }
+      }
     },
     "theirIdentityUnknown": {
         "message": "You haven't exchanged any messages with this contact yet. Your safety number with them will be available after the first message."
@@ -209,7 +386,7 @@
     },
     "installTagline": {
         "message": "Privacy is possible. Signal makes it easy.",
-        "description": "Tagline displayed under installWelcome on the install page"
+        "description": "Tagline displayed under 'installWelcome' string on the install page"
     },
     "installGetStartedButton": {
         "message": "Get started"
@@ -334,6 +511,10 @@
     "messageNotSent": {
         "message": "Message not sent.",
         "description": "Informational label, appears on messages that failed to send"
+    },
+    "someRecipientsFailed": {
+        "message": "Some recipients failed.",
+        "description": "When you send to multiple recipients via a group, and the message went to some recipients but not others."
     },
     "showMore": {
         "message": "Details",
@@ -525,16 +706,8 @@
       "message": "Play audio notification",
       "description": "Description for audio notification setting"
     },
-    "safetyNumbersSettingHeader": {
-      "message": "Safety numbers approval",
-      "description": "Header for safety numbers setting"
-    },
-    "safetyNumbersSettingDescription": {
-      "message": "Require approval of new safety numbers when they change",
-      "description": "Description for safety numbers setting"
-    },
     "keychanged": {
-      "message": "Your safety number with $name$ has changed. Click to verify.",
+      "message": "Your safety number with $name$ has changed. Click to show.",
       "description": "",
       "placeholders": {
         "name": {

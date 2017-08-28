@@ -19,6 +19,7 @@
             this.on('add remove change:unreadCount',
                 _.debounce(this.updateUnreadCount.bind(this), 1000)
             );
+            this.startPruning();
         },
         comparator: function(m1, m2) {
             var timestamp1 = m1.get('timestamp');
@@ -65,6 +66,14 @@
             if (newUnreadCount === 0) {
                 window.clearAttention();
             }
+        },
+        startPruning: function() {
+            var halfHour = 30 * 60 * 1000;
+            this.interval = setInterval(function() {
+                this.forEach(function(conversation) {
+                    conversation.trigger('prune');
+                });
+            }.bind(this), halfHour);
         }
     }))();
 
@@ -86,20 +95,26 @@
             var conversation = conversations.add(attrs, {merge: true});
             return conversation;
         },
-        findOrCreatePrivateById: function(id) {
-            var conversation = conversations.add({ id: id, type: 'private' });
+        findOrCreateById: function(id, type) {
+            var conversation = conversations.add({
+                id: id,
+                type: type
+            });
             return new Promise(function(resolve, reject) {
                 conversation.fetch().then(function() {
                     resolve(conversation);
-                }).fail(function() {
-                    var saved = conversation.save(); // false or indexedDBRequest
-                    if (saved) {
-                        saved.then(function() {
-                            resolve(conversation);
-                        }).fail(reject);
-                    } else {
-                        reject();
-                    }
+                }, function() {
+                    conversation.save().then(function() {
+                        resolve(conversation);
+                    }, reject);
+                });
+            });
+        },
+        getAllGroupsInvolvingId: function(id) {
+            var groups = new Whisper.GroupCollection();
+            return groups.fetchGroups(id).then(function() {
+                return groups.map(function(group) {
+                    return conversations.add(group);
                 });
             });
         },

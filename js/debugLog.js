@@ -40,7 +40,7 @@
         }
     });
 
-    var MAX_MESSAGES = 1000;
+    var MAX_MESSAGES = 5000;
     var PHONE_REGEX = /\+\d{7,12}(\d{3})/g;
     var log = new DebugLog();
     if (window.console) {
@@ -71,7 +71,7 @@
         };
 
         window.onerror = function(message, script, line, col, error) {
-            console.log(error);
+            console.log(error.stack);
         };
     }
 })();

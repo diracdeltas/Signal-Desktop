@@ -11,10 +11,13 @@
         var expired = new Whisper.MessageCollection();
         expired.on('add', function(message) {
             console.log('message', message.get('sent_at'), 'expired');
-            message.destroy();
             message.getConversation().trigger('expired', message);
+
+            // We delete after the trigger to allow the conversation time to process
+            //   the expiration before the message is removed from the database.
+            message.destroy();
         });
-        expired.on('reset', checkExpiringMessages);
+        expired.on('reset', throttledCheckExpiringMessages);
 
         expired.fetchExpired();
     }
@@ -28,20 +31,26 @@
             console.log('next message expires', new Date(expires_at).toISOString());
 
             var wait = expires_at - Date.now();
+
+            // In the past
             if (wait < 0) { wait = 0; }
+
+            // Too far in the future, since it's limited to a 32-bit value
+            if (wait > 2147483647) { wait = 2147483647; }
 
             clearTimeout(timeout);
             timeout = setTimeout(destroyExpiredMessages, wait);
         });
         expiring.fetchNextExpiring();
     }
+    var throttledCheckExpiringMessages = _.throttle(checkExpiringMessages, 1000);
 
     Whisper.ExpiringMessagesListener = {
         init: function(events) {
             checkExpiringMessages();
-            events.on('timetravel', checkExpiringMessages);
+            events.on('timetravel', throttledCheckExpiringMessages);
         },
-        update: checkExpiringMessages
+        update: throttledCheckExpiringMessages
     };
 
     var TimerOption = Backbone.Model.extend({

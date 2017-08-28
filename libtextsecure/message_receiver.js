@@ -3,6 +3,8 @@
  */
 
 function MessageReceiver(url, ports, username, password, signalingKey) {
+    this.count = 0;
+
     this.url = url;
     this.signalingKey = signalingKey;
     this.username = username;
@@ -30,7 +32,12 @@ MessageReceiver.prototype.extend({
             handleRequest: this.handleRequest.bind(this),
             keepalive: { path: '/v1/keepalive', disconnect: true }
         });
-        this.pending = Promise.resolve();
+
+        this.pending = this.queueAllCached();
+
+        // Ensures that an immediate 'empty' event from the websocket will fire only after
+        //   all cached envelopes are processed.
+        this.incoming = [this.pending];
     },
     close: function() {
         this.socket.close(3000, 'called close');
@@ -42,22 +49,25 @@ MessageReceiver.prototype.extend({
     onerror: function(error) {
         console.log('websocket error');
     },
+    dispatchAndWait: function(event) {
+        return Promise.all(this.dispatchEvent(event));
+    },
     onclose: function(ev) {
         console.log('websocket closed', ev.code, ev.reason || '');
         if (ev.code === 3000) {
             return;
         }
-        var eventTarget = this;
         // possible 403 or network issue. Make an request to confirm
-        this.server.getDevices(this.number).
-            then(this.connect.bind(this)). // No HTTP error? Reconnect
-            catch(function(e) {
+        return this.server.getDevices(this.number)
+            .then(this.connect.bind(this)) // No HTTP error? Reconnect
+            .catch(function(e) {
                 var ev = new Event('error');
                 ev.error = e;
-                eventTarget.dispatchEvent(ev);
-            });
+                return this.dispatchAndWait(ev);
+            }.bind(this));
     },
     handleRequest: function(request) {
+        this.incoming = this.incoming || [];
         // We do the message decryption here, instead of in the ordered pending queue,
         // to avoid exposing the time it took us to process messages through the time-to-ack.
 
@@ -65,31 +75,215 @@ MessageReceiver.prototype.extend({
         if (request.path !== '/api/v1/message') {
             console.log('got request', request.verb, request.path);
             request.respond(200, 'OK');
+
+            if (request.verb === 'PUT' && request.path === '/api/v1/queue/empty') {
+                this.onEmpty();
+            }
             return;
         }
 
-        textsecure.crypto.decryptWebsocketMessage(request.body, this.signalingKey).then(function(plaintext) {
+        this.incoming.push(textsecure.crypto.decryptWebsocketMessage(request.body, this.signalingKey).then(function(plaintext) {
             var envelope = textsecure.protobuf.Envelope.decode(plaintext);
             // After this point, decoding errors are not the server's
-            // fault, and we should handle them gracefully and tell the
-            // user they received an invalid message
-            request.respond(200, 'OK');
+            //   fault, and we should handle them gracefully and tell the
+            //   user they received an invalid message
 
-            if (!this.isBlocked(envelope.source)) {
-                this.queueEnvelope(envelope);
+            if (this.isBlocked(envelope.source)) {
+                return request.respond(200, 'OK');
             }
 
+            return this.addToCache(envelope, plaintext).then(function() {
+                request.respond(200, 'OK');
+                this.queueEnvelope(envelope);
+            }.bind(this), function(error) {
+                console.log(
+                    'handleRequest error trying to add message to cache:',
+                    error && error.stack ? error.stack : error
+                );
+            });
         }.bind(this)).catch(function(e) {
             request.respond(500, 'Bad encrypted websocket message');
-            console.log("Error handling incoming message:", e);
+            console.log("Error handling incoming message:", e && e.stack ? e.stack : e);
             var ev = new Event('error');
             ev.error = e;
-            this.dispatchEvent(ev);
+            return this.dispatchAndWait(ev);
+        }.bind(this)));
+    },
+    addToQueue: function(task) {
+        var count = this.count += 1;
+        var current = this.pending = this.pending.then(task, task);
+
+        var cleanup = function() {
+            this.updateProgress(count);
+            // We want to clear out the promise chain whenever possible because it could
+            //   lead to large memory usage over time:
+            //   https://github.com/nodejs/node/issues/6673#issuecomment-244331609
+            if (this.pending === current) {
+                this.pending = Promise.resolve();
+            }
+        }.bind(this);
+
+        current.then(cleanup, cleanup);
+
+        return current;
+    },
+    onEmpty: function() {
+        var incoming = this.incoming;
+        this.incoming = [];
+
+        var dispatchEmpty = function() {
+            console.log('MessageReceiver: emitting \'empty\' event');
+            var ev = new Event('empty');
+            return this.dispatchAndWait(ev);
+        }.bind(this);
+
+        var queueDispatch = function() {
+            // resetting count to zero so everything queued after this starts over again
+            this.count = 0;
+
+            this.addToQueue(dispatchEmpty);
+        }.bind(this);
+
+        // We first wait for all recently-received messages (this.incoming) to be queued,
+        //   then we add a task to emit the 'empty' event to the queue, so all message
+        //   processing is complete by the time it runs.
+        Promise.all(incoming).then(queueDispatch, queueDispatch);
+    },
+    updateProgress: function(count) {
+        // count by 10s
+        if (count % 10 !== 0) {
+            return;
+        }
+        var ev = new Event('progress');
+        ev.count = count;
+        this.dispatchEvent(ev);
+    },
+    queueAllCached: function() {
+        return this.getAllFromCache().then(function(items) {
+            for (var i = 0, max = items.length; i < max; i += 1) {
+                this.queueCached(items[i]);
+            }
         }.bind(this));
     },
+    queueCached: function(item) {
+        try {
+            var envelopePlaintext = item.envelope;
+
+            // Up until 0.42.6 we stored envelope and decrypted as strings in IndexedDB,
+            //   so we need to be ready for them.
+            if (typeof envelopePlaintext === 'string') {
+              envelopePlaintext = this.stringToArrayBuffer(envelopePlaintext);
+            }
+            var envelope = textsecure.protobuf.Envelope.decode(envelopePlaintext);
+
+            var decrypted = item.decrypted;
+            if (decrypted) {
+                var payloadPlaintext = decrypted;
+                if (typeof payloadPlaintext === 'string') {
+                    payloadPlaintext = this.stringToArrayBuffer(payloadPlaintext);
+                }
+                this.queueDecryptedEnvelope(envelope, payloadPlaintext);
+            } else {
+                this.queueEnvelope(envelope);
+            }
+        }
+        catch (error) {
+            console.log('queueCached error handling item', item.id);
+        }
+    },
+    getEnvelopeId: function(envelope) {
+        return envelope.source + '.' + envelope.sourceDevice + ' ' + envelope.timestamp.toNumber();
+    },
+    stringToArrayBuffer: function(string) {
+        return new dcodeIO.ByteBuffer.wrap(string, 'binary').toArrayBuffer();
+    },
+    getAllFromCache: function() {
+        console.log('getAllFromCache');
+        return textsecure.storage.unprocessed.getAll().then(function(items) {
+            console.log('getAllFromCache loaded', items.length, 'saved envelopes');
+
+            return Promise.all(_.map(items, function(item) {
+                var attempts = 1 + (item.attempts || 0);
+                if (attempts >= 5) {
+                    console.log('getAllFromCache final attempt for envelope', item.id);
+                    return textsecure.storage.unprocessed.remove(item.id);
+                } else {
+                    return textsecure.storage.unprocessed.update(item.id, {attempts: attempts});
+                }
+            }.bind(this))).then(function() {
+                return items;
+            }, function(error) {
+                console.log(
+                    'getAllFromCache error updating items after load:',
+                    error && error.stack ? error.stack : error
+                );
+                return items;
+            });
+        }.bind(this));
+    },
+    addToCache: function(envelope, plaintext) {
+        var id = this.getEnvelopeId(envelope);
+        console.log('addToCache', id);
+        var data = {
+            id: id,
+            envelope: plaintext,
+            timestamp: Date.now(),
+            attempts: 1
+        };
+        return textsecure.storage.unprocessed.add(data);
+    },
+    updateCache: function(envelope, plaintext) {
+        var id = this.getEnvelopeId(envelope);
+        console.log('updateCache', id);
+        var data = {
+            decrypted: plaintext
+        };
+        return textsecure.storage.unprocessed.update(id, data);
+    },
+    removeFromCache: function(envelope) {
+        var id = this.getEnvelopeId(envelope);
+        console.log('removeFromCache', id);
+        return textsecure.storage.unprocessed.remove(id);
+    },
+    queueDecryptedEnvelope: function(envelope, plaintext) {
+        var id = this.getEnvelopeId(envelope);
+        console.log('queueing decrypted envelope', id);
+
+        var task = this.handleDecryptedEnvelope.bind(this, envelope, plaintext);
+        var taskWithTimeout = textsecure.createTaskWithTimeout(task, 'queueEncryptedEnvelope ' + id);
+        var promise = this.addToQueue(taskWithTimeout);
+
+        return promise.catch(function(error) {
+            console.log('queueDecryptedEnvelope error handling envelope', id, ':', error && error.stack ? error.stack : error);
+        });
+    },
     queueEnvelope: function(envelope) {
-        var handleEnvelope = this.handleEnvelope.bind(this, envelope);
-        this.pending = this.pending.then(handleEnvelope, handleEnvelope);
+        var id = this.getEnvelopeId(envelope);
+        console.log('queueing envelope', id);
+
+        var task = this.handleEnvelope.bind(this, envelope);
+        var taskWithTimeout = textsecure.createTaskWithTimeout(task, 'queueEnvelope ' + id);
+        var promise = this.addToQueue(taskWithTimeout);
+
+        return promise.catch(function(error) {
+            console.log('queueEnvelope error handling envelope', id, ':', error && error.stack ? error.stack : error);
+        });
+    },
+    // Same as handleEnvelope, just without the decryption step. Necessary for handling
+    //   messages which were successfully decrypted, but application logic didn't finish
+    //   processing.
+    handleDecryptedEnvelope: function(envelope, plaintext) {
+        // No decryption is required for delivery receipts, so the decrypted field of
+        //   the Unprocessed model will never be set
+
+        if (envelope.content) {
+            return this.innerHandleContentMessage(envelope, plaintext);
+        } else if (envelope.legacyMessage) {
+            return this.innerHandleLegacyMessage(envelope, plaintext);
+        } else {
+            this.removeFromCache(envelope);
+            throw new Error('Received message with no content and no legacyMessage');
+        }
     },
     handleEnvelope: function(envelope) {
         if (envelope.type === textsecure.protobuf.Envelope.Type.RECEIPT) {
@@ -101,6 +295,7 @@ MessageReceiver.prototype.extend({
         } else if (envelope.legacyMessage) {
             return this.handleLegacyMessage(envelope);
         } else {
+            this.removeFromCache(envelope);
             throw new Error('Received message with no content and no legacyMessage');
         }
     },
@@ -112,9 +307,12 @@ MessageReceiver.prototype.extend({
         }
     },
     onDeliveryReceipt: function (envelope) {
-        var ev = new Event('receipt');
-        ev.proto = envelope;
-        this.dispatchEvent(ev);
+        return new Promise(function(resolve, reject) {
+            var ev = new Event('receipt');
+            ev.confirm = this.removeFromCache.bind(this, envelope);
+            ev.proto = envelope;
+            this.dispatchAndWait(ev).then(resolve, reject);
+        }.bind(this));
     },
     unpad: function(paddedPlaintext) {
         paddedPlaintext = new Uint8Array(paddedPlaintext);
@@ -135,25 +333,59 @@ MessageReceiver.prototype.extend({
     decrypt: function(envelope, ciphertext) {
         var promise;
         var address = new libsignal.SignalProtocolAddress(envelope.source, envelope.sourceDevice);
-        var sessionCipher = new libsignal.SessionCipher(textsecure.storage.protocol, address);
+
+        var ourNumber = textsecure.storage.user.getNumber();
+        var number = address.toString().split('.')[0];
+        var options = {};
+
+        // No limit on message keys if we're communicating with our other devices
+        if (ourNumber === number) {
+            options.messageKeysLimit = false;
+        }
+
+        var sessionCipher = new libsignal.SessionCipher(textsecure.storage.protocol, address, options);
         switch(envelope.type) {
             case textsecure.protobuf.Envelope.Type.CIPHERTEXT:
-                console.log('message from', envelope.source + '.' + envelope.sourceDevice, envelope.timestamp.toNumber());
+                console.log('message from', this.getEnvelopeId(envelope));
                 promise = sessionCipher.decryptWhisperMessage(ciphertext).then(this.unpad);
                 break;
             case textsecure.protobuf.Envelope.Type.PREKEY_BUNDLE:
-                console.log('prekey message from', envelope.source + '.' + envelope.sourceDevice, envelope.timestamp.toNumber());
+                console.log('prekey message from', this.getEnvelopeId(envelope));
                 promise = this.decryptPreKeyWhisperMessage(ciphertext, sessionCipher, address);
                 break;
             default:
                 promise = Promise.reject(new Error("Unknown message type"));
         }
-        return promise.catch(function(error) {
+        return promise.then(function(plaintext) {
+            return this.updateCache(envelope, plaintext).then(function() {
+                return plaintext;
+            }, function(error) {
+                console.log(
+                    'decrypt failed to save decrypted message contents to cache:',
+                    error && error.stack ? error.stack : error
+                );
+                return plaintext;
+            });
+        }.bind(this)).catch(function(error) {
+            if (error.message === 'Unknown identity key') {
+                // create an error that the UI will pick up and ask the
+                // user if they want to re-negotiate
+                var buffer = dcodeIO.ByteBuffer.wrap(ciphertext);
+                error = new textsecure.IncomingIdentityKeyError(
+                    address.toString(),
+                    buffer.toArrayBuffer(),
+                    error.identityKey
+                );
+            }
             var ev = new Event('error');
             ev.error = error;
             ev.proto = envelope;
-            this.dispatchEvent(ev);
-            return Promise.reject(error);
+            ev.confirm = this.removeFromCache.bind(this, envelope);
+
+            var returnError = function() {
+                return Promise.reject(error);
+            };
+            return this.dispatchAndWait(ev).then(returnError, returnError);
         }.bind(this));
     },
     decryptPreKeyWhisperMessage: function(ciphertext, sessionCipher, address) {
@@ -171,7 +403,7 @@ MessageReceiver.prototype.extend({
             throw e;
         });
     },
-    handleSentMessage: function(destination, timestamp, message, expirationStartTimestamp) {
+    handleSentMessage: function(envelope, destination, timestamp, message, expirationStartTimestamp) {
         var p = Promise.resolve();
         if ((message.flags & textsecure.protobuf.DataMessage.Flags.END_SESSION) ==
                 textsecure.protobuf.DataMessage.Flags.END_SESSION ) {
@@ -180,21 +412,22 @@ MessageReceiver.prototype.extend({
         return p.then(function() {
             return this.processDecrypted(message, this.number).then(function(message) {
                 var ev = new Event('sent');
+                ev.confirm = this.removeFromCache.bind(this, envelope);
                 ev.data = {
                     destination              : destination,
                     timestamp                : timestamp.toNumber(),
+                    device                   : envelope.sourceDevice,
                     message                  : message
                 };
                 if (expirationStartTimestamp) {
                   ev.data.expirationStartTimestamp = expirationStartTimestamp.toNumber();
                 }
-                this.dispatchEvent(ev);
+                return this.dispatchAndWait(ev);
             }.bind(this));
         }.bind(this));
     },
     handleDataMessage: function(envelope, message) {
-        var encodedNumber = envelope.source + '.' + envelope.sourceDevice;
-        console.log('data message from', encodedNumber, envelope.timestamp.toNumber());
+        console.log('data message from', this.getEnvelopeId(envelope));
         var p = Promise.resolve();
         if ((message.flags & textsecure.protobuf.DataMessage.Flags.END_SESSION) ==
                 textsecure.protobuf.DataMessage.Flags.END_SESSION ) {
@@ -203,32 +436,48 @@ MessageReceiver.prototype.extend({
         return p.then(function() {
             return this.processDecrypted(message, envelope.source).then(function(message) {
                 var ev = new Event('message');
+                ev.confirm = this.removeFromCache.bind(this, envelope);
                 ev.data = {
-                    source    : envelope.source,
-                    timestamp : envelope.timestamp.toNumber(),
-                    message   : message
+                    source       : envelope.source,
+                    sourceDevice : envelope.sourceDevice,
+                    timestamp    : envelope.timestamp.toNumber(),
+                    receivedAt   : envelope.receivedAt,
+                    message      : message
                 };
-                this.dispatchEvent(ev);
+                return this.dispatchAndWait(ev);
             }.bind(this));
         }.bind(this));
     },
     handleLegacyMessage: function (envelope) {
         return this.decrypt(envelope, envelope.legacyMessage).then(function(plaintext) {
-            var message = textsecure.protobuf.DataMessage.decode(plaintext);
-            return this.handleDataMessage(envelope, message);
+            return this.innerHandleLegacyMessage(envelope, plaintext);
         }.bind(this));
+    },
+    innerHandleLegacyMessage: function (envelope, plaintext) {
+        var message = textsecure.protobuf.DataMessage.decode(plaintext);
+        return this.handleDataMessage(envelope, message);
     },
     handleContentMessage: function (envelope) {
         return this.decrypt(envelope, envelope.content).then(function(plaintext) {
-            var content = textsecure.protobuf.Content.decode(plaintext);
-            if (content.syncMessage) {
-                return this.handleSyncMessage(envelope, content.syncMessage);
-            } else if (content.dataMessage) {
-                return this.handleDataMessage(envelope, content.dataMessage);
-            } else {
-                throw new Error('Got Content message with no dataMessage and no syncMessage');
-            }
+            return this.innerHandleContentMessage(envelope, plaintext);
         }.bind(this));
+    },
+    innerHandleContentMessage: function(envelope, plaintext) {
+        var content = textsecure.protobuf.Content.decode(plaintext);
+        if (content.syncMessage) {
+            return this.handleSyncMessage(envelope, content.syncMessage);
+        } else if (content.dataMessage) {
+            return this.handleDataMessage(envelope, content.dataMessage);
+        } else if (content.nullMessage) {
+            return this.handleNullMessage(envelope, content.nullMessage);
+        } else {
+            this.removeFromCache(envelope);
+            throw new Error('Unsupported content message');
+        }
+    },
+    handleNullMessage: function(envelope, nullMessage) {
+        console.log('null message from', this.getEnvelopeId(envelope));
+        this.removeFromCache(envelope);
     },
     handleSyncMessage: function(envelope, syncMessage) {
         if (envelope.source !== this.number) {
@@ -242,60 +491,96 @@ MessageReceiver.prototype.extend({
             console.log('sent message to',
                     sentMessage.destination,
                     sentMessage.timestamp.toNumber(),
-                    'from', envelope.source + '.' + envelope.sourceDevice
+                    'from',
+                    this.getEnvelopeId(envelope)
             );
             return this.handleSentMessage(
+                    envelope,
                     sentMessage.destination,
                     sentMessage.timestamp,
                     sentMessage.message,
                     sentMessage.expirationStartTimestamp
             );
         } else if (syncMessage.contacts) {
-            this.handleContacts(syncMessage.contacts);
+            return this.handleContacts(envelope, syncMessage.contacts);
         } else if (syncMessage.groups) {
-            this.handleGroups(syncMessage.groups);
+            return this.handleGroups(envelope, syncMessage.groups);
         } else if (syncMessage.blocked) {
-            this.handleBlocked(syncMessage.blocked);
+            return this.handleBlocked(envelope, syncMessage.blocked);
         } else if (syncMessage.request) {
             console.log('Got SyncMessage Request');
-        } else if (syncMessage.read) {
+            return this.removeFromCache(envelope);
+        } else if (syncMessage.read && syncMessage.read.length) {
             console.log('read messages',
                     'from', envelope.source + '.' + envelope.sourceDevice);
-            this.handleRead(syncMessage.read, envelope.timestamp);
+            return this.handleRead(envelope, syncMessage.read);
+        } else if (syncMessage.verified) {
+            return this.handleVerified(envelope, syncMessage.verified);
         } else {
             throw new Error('Got empty SyncMessage');
         }
     },
-    handleRead: function(read, timestamp) {
+    handleVerified: function(envelope, verified, options) {
+        options = options || {};
+        _.defaults(options, {viaContactSync: false});
+
+        var ev = new Event('verified');
+        ev.confirm = this.removeFromCache.bind(this, envelope);
+        ev.verified = {
+            state: verified.state,
+            destination: verified.destination,
+            identityKey: verified.identityKey.toArrayBuffer()
+        };
+        ev.viaContactSync = options.viaContactSync;
+        return this.dispatchAndWait(ev);
+    },
+    handleRead: function(envelope, read) {
+        var results = [];
         for (var i = 0; i < read.length; ++i) {
             var ev = new Event('read');
-            ev.timestamp = timestamp.toNumber();
+            ev.confirm = this.removeFromCache.bind(this, envelope);
+            ev.timestamp = envelope.timestamp.toNumber();
             ev.read = {
-              timestamp : read[i].timestamp.toNumber(),
-              sender    : read[i].sender
+                timestamp : read[i].timestamp.toNumber(),
+                sender    : read[i].sender
             }
-            this.dispatchEvent(ev);
+            results.push(this.dispatchAndWait(ev));
         }
+        return Promise.all(results);
     },
-    handleContacts: function(contacts) {
+    handleContacts: function(envelope, contacts) {
         console.log('contact sync');
-        var eventTarget = this;
         var attachmentPointer = contacts.blob;
         return this.handleAttachment(attachmentPointer).then(function() {
+            var results = [];
             var contactBuffer = new ContactBuffer(attachmentPointer.data);
             var contactDetails = contactBuffer.next();
             while (contactDetails !== undefined) {
                 var ev = new Event('contact');
+                ev.confirm = this.removeFromCache.bind(this, envelope);
                 ev.contactDetails = contactDetails;
-                eventTarget.dispatchEvent(ev);
+                results.push(this.dispatchAndWait(ev));
+
+                if (contactDetails.verified) {
+                    results.push(this.handleVerified(
+                        envelope,
+                        contactDetails.verified,
+                        {viaContactSync: true}
+                    ));
+                }
+
                 contactDetails = contactBuffer.next();
             }
-            eventTarget.dispatchEvent(new Event('contactsync'));
-        });
+
+            var ev = new Event('contactsync');
+            ev.confirm = this.removeFromCache.bind(this, envelope);
+            results.push(this.dispatchAndWait(ev));
+
+            return Promise.all(results);
+        }.bind(this));
     },
-    handleGroups: function(groups) {
+    handleGroups: function(envelope, groups) {
         console.log('group sync');
-        var eventTarget = this;
         var attachmentPointer = groups.blob;
         return this.handleAttachment(attachmentPointer).then(function() {
             var groupBuffer = new GroupBuffer(attachmentPointer.data);
@@ -322,18 +607,22 @@ MessageReceiver.prototype.extend({
                     }
                 })(groupDetails).then(function(groupDetails) {
                     var ev = new Event('group');
+                    ev.confirm = this.removeFromCache.bind(this, envelope);
                     ev.groupDetails = groupDetails;
-                    eventTarget.dispatchEvent(ev);
-                }).catch(function(e) {
+                    return this.dispatchAndWait(ev);
+                }.bind(this)).catch(function(e) {
                     console.log('error processing group', e);
                 });
                 groupDetails = groupBuffer.next();
                 promises.push(promise);
             }
+
             Promise.all(promises).then(function() {
-                eventTarget.dispatchEvent(new Event('groupsync'));
-            });
-        });
+                var ev = new Event('groupsync');
+                ev.confirm = this.removeFromCache.bind(this, envelope);
+                return this.dispatchAndWait(ev);
+            }.bind(this));
+        }.bind(this));
     },
     handleBlocked: function(blocked) {
         textsecure.storage.put('blocked', blocked.numbers);
@@ -359,28 +648,88 @@ MessageReceiver.prototype.extend({
             attachment.data = data;
         }
 
-        return this.server.getAttachment(attachment.id).
-        then(decryptAttachment).
-        then(updateAttachment);
+        return this.server.getAttachment(attachment.id)
+            .then(decryptAttachment)
+            .then(updateAttachment);
     },
-    tryMessageAgain: function(from, ciphertext) {
+    validateRetryContentMessage: function(content) {
+        // Today this is only called for incoming identity key errors. So it can't be a sync message.
+        if (content.syncMessage) {
+            return false;
+        }
+
+        // We want at least one field set, but not more than one
+        var count = 0;
+        count += content.dataMessage ? 1 : 0;
+        count += content.callMessage ? 1 : 0;
+        count += content.nullMessage ? 1 : 0;
+        if (count !== 1) {
+            return false;
+        }
+
+        // It's most likely that dataMessage will be populated, so we look at it in detail
+        var data = content.dataMessage;
+        if (data && !data.attachments.length && !data.body && !data.expireTimer && !data.flags && !data.group) {
+            return false;
+        }
+
+        return true;
+    },
+    tryMessageAgain: function(from, ciphertext, message) {
         var address = libsignal.SignalProtocolAddress.fromString(from);
-        var sessionCipher = new libsignal.SessionCipher(textsecure.storage.protocol, address);
+        var sentAt = message.sent_at || Date.now();
+        var receivedAt = message.received_at || Date.now();
+
+        var ourNumber = textsecure.storage.user.getNumber();
+        var number = address.getName();
+        var device = address.getDeviceId();
+        var options = {};
+
+        // No limit on message keys if we're communicating with our other devices
+        if (ourNumber === number) {
+            options.messageKeysLimit = false;
+        }
+
+        var sessionCipher = new libsignal.SessionCipher(textsecure.storage.protocol, address, options);
         console.log('retrying prekey whisper message');
         return this.decryptPreKeyWhisperMessage(ciphertext, sessionCipher, address).then(function(plaintext) {
-            var finalMessage = textsecure.protobuf.DataMessage.decode(plaintext);
+            var envelope = {
+                source: number,
+                sourceDevice: device,
+                receivedAt: receivedAt,
+                timestamp: {
+                    toNumber: function() {
+                        return sentAt;
+                    }
+                }
+            };
 
-            var p = Promise.resolve();
-            if ((finalMessage.flags & textsecure.protobuf.DataMessage.Flags.END_SESSION)
-                    == textsecure.protobuf.DataMessage.Flags.END_SESSION &&
-                    finalMessage.sync !== null) {
-                    var number = address.getName();
-                    p = this.handleEndSession(number);
+            // Before June, all incoming messages were still DataMessage:
+            //   - iOS: Michael Kirk says that they were sending Legacy messages until June
+            //   - Desktop: https://github.com/WhisperSystems/Signal-Desktop/commit/e8548879db405d9bcd78b82a456ad8d655592c0f
+            //   - Android: https://github.com/WhisperSystems/libsignal-service-java/commit/61a75d023fba950ff9b4c75a249d1a3408e12958
+            //
+            // var d = new Date('2017-06-01T07:00:00.000Z');
+            // d.getTime();
+            var startOfJune = 1496300400000;
+            if (sentAt < startOfJune) {
+                return this.innerHandleLegacyMessage(envelope, plaintext);
             }
 
-            return p.then(function() {
-                return this.processDecrypted(finalMessage);
-            }.bind(this));
+            // This is ugly. But we don't know what kind of proto we need to decode...
+            try {
+                // Simply decoding as a Content message may throw
+                var content = textsecure.protobuf.Content.decode(plaintext);
+
+                // But it might also result in an invalid object, so we try to detect that
+                if (this.validateRetryContentMessage(content)) {
+                    return this.innerHandleContentMessage(envelope, plaintext);
+                }
+            } catch(e) {
+                return this.innerHandleLegacyMessage(envelope, plaintext);
+            }
+
+            return this.innerHandleLegacyMessage(envelope, plaintext);
         }.bind(this));
     },
     handleEndSession: function(number) {

@@ -2,12 +2,16 @@
  * vim: ts=4:sw=4:expandtab
  */
 function OutgoingMessage(server, timestamp, numbers, message, callback) {
+    if (message instanceof textsecure.protobuf.DataMessage) {
+        var content = new textsecure.protobuf.Content();
+        content.dataMessage = message;
+        message = content;
+    }
     this.server = server;
     this.timestamp = timestamp;
     this.numbers = numbers;
-    this.message = message; // DataMessage or ContentMessage proto
+    this.message = message; // ContentMessage proto
     this.callback = callback;
-    this.legacy = (message instanceof textsecure.protobuf.DataMessage);
 
     this.numbersCompleted = 0;
     this.errors = [];
@@ -55,10 +59,9 @@ OutgoingMessage.prototype = {
                     }
                     return builder.processPreKey(device).catch(function(error) {
                         if (error.message === "Identity key changed") {
-                            error = new textsecure.OutgoingIdentityKeyError(
-                                number, this.message.toArrayBuffer(),
-                                this.timestamp, device.identityKey);
-                            this.registerError(number, "Identity key changed", error);
+                            error.timestamp = this.timestamp;
+                            error.originalMessage = this.message.toArrayBuffer();
+                            error.identityKey = device.identityKey;
                         }
                         throw error;
                     }.bind(this));
@@ -74,8 +77,11 @@ OutgoingMessage.prototype = {
                 promise = promise.then(function() {
                     return this.server.getKeysForNumber(number, device).then(handleResult).catch(function(e) {
                         if (e.name === 'HTTPError' && e.code === 404) {
-                            if (device !== 1) return this.removeDeviceIdsForNumber(number, [device]);
-                            else throw new textsecure.UnregisteredUserError(number, e);
+                            if (device !== 1) {
+                                return this.removeDeviceIdsForNumber(number, [device]);
+                            } else {
+                                throw new textsecure.UnregisteredUserError(number, e);
+                            }
                         } else {
                             throw e;
                         }
@@ -113,20 +119,43 @@ OutgoingMessage.prototype = {
         return messagePartCount * 160;
     },
 
+    getPlaintext: function() {
+        if (!this.plaintext) {
+            var messageBuffer = this.message.toArrayBuffer();
+            this.plaintext = new Uint8Array(
+                this.getPaddedMessageLength(messageBuffer.byteLength + 1) - 1
+            );
+            this.plaintext.set(new Uint8Array(messageBuffer));
+            this.plaintext[messageBuffer.byteLength] = 0x80;
+        }
+        return this.plaintext;
+    },
+
     doSendMessage: function(number, deviceIds, recurse) {
         var ciphers = {};
-        var plaintext = this.message.toArrayBuffer();
-        var paddedPlaintext = new Uint8Array(
-            this.getPaddedMessageLength(plaintext.byteLength + 1) - 1
-        );
-        paddedPlaintext.set(new Uint8Array(plaintext));
-        paddedPlaintext[plaintext.byteLength] = 0x80;
+        var plaintext = this.getPlaintext();
 
         return Promise.all(deviceIds.map(function(deviceId) {
             var address = new libsignal.SignalProtocolAddress(number, deviceId);
-            var sessionCipher =  new libsignal.SessionCipher(textsecure.storage.protocol, address);
+
+            var ourNumber = textsecure.storage.user.getNumber();
+            var options = {};
+
+            // No limit on message keys if we're communicating with our other devices
+            if (ourNumber === number) {
+                options.messageKeysLimit = false;
+            }
+
+            var sessionCipher = new libsignal.SessionCipher(textsecure.storage.protocol, address, options);
             ciphers[address.getDeviceId()] = sessionCipher;
-            return this.encryptToDevice(address, paddedPlaintext, sessionCipher);
+            return sessionCipher.encrypt(plaintext).then(function(ciphertext) {
+                return {
+                    type                      : ciphertext.type,
+                    destinationDeviceId       : address.getDeviceId(),
+                    destinationRegistrationId : ciphertext.registrationId,
+                    content                   : btoa(ciphertext.body)
+                };
+            });
         }.bind(this))).then(function(jsonData) {
             return this.transmitMessage(number, jsonData, this.timestamp).then(function() {
                 this.successfulNumbers[this.successfulNumbers.length] = number;
@@ -149,38 +178,17 @@ OutgoingMessage.prototype = {
                 return p.then(function() {
                     var resetDevices = ((error.code == 410) ? error.response.staleDevices : error.response.missingDevices);
                     return this.getKeysForNumber(number, resetDevices)
-                        .then(this.reloadDevicesAndSend(number, (error.code == 409)))
-                        .catch(function(error) {
-                            this.registerError(number, "Failed to reload device keys", error);
-                        }.bind(this));
+                        .then(this.reloadDevicesAndSend(number, error.code == 409));
                 }.bind(this));
+            } else if (error.message === "Identity key changed") {
+                error.timestamp = this.timestamp;
+                error.originalMessage = this.message.toArrayBuffer();
+                console.log('Got "key changed" error from encrypt - no identityKey for application layer', number, deviceIds)
+                throw error;
             } else {
                 this.registerError(number, "Failed to create or send message", error);
             }
         }.bind(this));
-    },
-
-    encryptToDevice: function(address, plaintext, sessionCipher) {
-        return sessionCipher.encrypt(plaintext).then(function(ciphertext) {
-            return this.toJSON(address, ciphertext);
-        }.bind(this));
-    },
-
-    toJSON: function(address, encryptedMsg) {
-        var json = {
-            type                      : encryptedMsg.type,
-            destinationDeviceId       : address.getDeviceId(),
-            destinationRegistrationId : encryptedMsg.registrationId
-        };
-
-        var content = btoa(encryptedMsg.body);
-        if (this.legacy) {
-            json.body = content;
-        } else {
-            json.content = content;
-        }
-
-        return json;
     },
 
     getStaleDeviceIdsForNumber: function(number) {
@@ -219,7 +227,16 @@ OutgoingMessage.prototype = {
             return this.getKeysForNumber(number, updateDevices)
                 .then(this.reloadDevicesAndSend(number, true))
                 .catch(function(error) {
-                    this.registerError(number, "Failed to retreive new device keys for number " + number, error);
+                    if (error.message === "Identity key changed") {
+                        error = new textsecure.OutgoingIdentityKeyError(
+                            number, error.originalMessage, error.timestamp, error.identityKey
+                        );
+                        this.registerError(number, "Identity key changed", error);
+                    } else {
+                        this.registerError(
+                            number, "Failed to retrieve new device keys for number " + number, error
+                        );
+                    }
                 }.bind(this));
         }.bind(this));
     }

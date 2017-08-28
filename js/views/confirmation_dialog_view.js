@@ -10,28 +10,48 @@
         templateName: 'confirmation-dialog',
         initialize: function(options) {
             this.message = options.message;
+            this.hideCancel = options.hideCancel;
+
             this.resolve = options.resolve;
+            this.okText = options.okText || i18n('ok');
+
             this.reject = options.reject;
+            this.cancelText = options.cancelText || i18n('cancel');
+
             this.render();
         },
         events: {
-          'click .ok': 'ok',
-          'click .cancel': 'cancel',
+            'keyup': 'onKeyup',
+            'click .ok': 'ok',
+            'click .cancel': 'cancel',
         },
         render_attributes: function() {
             return {
                 message: this.message,
-                cancel: i18n('cancel'),
-                ok: i18n('ok')
+                showCancel: !this.hideCancel,
+                cancel: this.cancelText,
+                ok: this.okText
             };
         },
         ok: function() {
-          this.remove();
-          this.resolve();
+            this.remove();
+            if (this.resolve) {
+                this.resolve();
+            }
         },
         cancel: function() {
-          this.remove();
-          this.reject();
+            this.remove();
+            if (this.reject) {
+                this.reject();
+            }
+        },
+        onKeyup: function(event) {
+            if (event.key === 'Escape' || event.key === 'Esc') {
+                this.cancel();
+            }
+        },
+        focusCancel: function() {
+            this.$('.cancel').focus();
         }
     });
 })();

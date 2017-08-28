@@ -47,6 +47,7 @@ module.exports = function(grunt) {
           'libtextsecure/storage.js',
           'libtextsecure/storage/user.js',
           'libtextsecure/storage/groups.js',
+          'libtextsecure/storage/unprocessed.js',
           'libtextsecure/protobufs.js',
           'libtextsecure/websocket-resources.js',
           'libtextsecure/helpers.js',
@@ -60,6 +61,7 @@ module.exports = function(grunt) {
           'libtextsecure/sync_request.js',
           'libtextsecure/contacts_parser.js',
           'libtextsecure/ProvisioningCipher.js',
+          'libtextsecure/task_with_timeout.js',
         ],
         dest: 'js/libtextsecure.js',
       },
@@ -197,7 +199,6 @@ module.exports = function(grunt) {
           build: process.env.TRAVIS_JOB_ID,
           browsers: [
             { browserName: 'chrome', version: '41' },
-            { platform: 'linux', browserName: 'firefox', version: '34' }
           ],
           testname: 'TextSecure-Browser Tests',
           'max-duration': 300,

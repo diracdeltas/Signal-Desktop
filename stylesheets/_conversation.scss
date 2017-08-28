@@ -14,10 +14,69 @@
     padding: 0 5px 0 4px;
   }
 }
+.conversation-title .verified {
+  &:before {
+    content:"\00b7"; // &middot
+    font-weight: bold;
+    padding: 0 5px 0 4px;
+  }
+}
+.conversation-title .verified-icon {
+  @include color-svg('/images/verified-check.svg', white);
+  display: inline-block;
+  width: 1.25em;
+  height: 1.25em;
+  vertical-align: text-bottom;
+}
 
 .conversation {
   background-color: white;
   height: 100%;
+  position: relative;
+
+  .conversation-loading-screen {
+    z-index: 99;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    background-color: #eee;
+    display: flex;
+    align-items: center;
+
+    .content {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+    }
+
+    .container {
+      position: absolute;
+      left: 50%;
+      width: 78px;
+      transform: translate(-50%, 0);
+    }
+
+    .dot {
+      width: 14px;
+      height: 14px;
+      border: 3px solid $blue;
+      border-radius: 50%;
+      float: left;
+      margin: 0 6px;
+      transform: scale(0);
+
+      animation: loading 1500ms ease infinite 0ms;
+      &:nth-child(2) {
+        animation: loading 1500ms ease infinite 333ms;
+      }
+      &:nth-child(3) {
+        animation: loading 1500ms ease infinite 666ms;
+      }
+    }
+  }
 
   .panel {
     height: calc(100% - #{$header-height});
@@ -25,7 +84,7 @@
 
     .container {
       padding-top: 20px;
-      max-width: 950px;
+      max-width: 750px;
       margin: 0 auto;
       padding: 20px;
     }
@@ -69,6 +128,20 @@
     font-size: $font-size-small;
   }
 
+  .icon {
+    height: 1.25em;
+    width: 1.25em;
+    vertical-align: text-bottom;
+    display: inline-block;
+
+    &.verified {
+      @include color-svg('/images/verified-check.svg', $grey_d);
+    }
+    &.shield {
+      @include color-svg('/images/shield.svg', $grey_d);
+    }
+  }
+
   .key, .placeholder {
     padding: 0 1em;
     -webkit-user-select: text;
@@ -101,44 +174,43 @@
       max-width: 100%;
     }
   }
+
+  .summary {
+    margin: 30px 0 10px;
+    text-align: center;
+  }
+
+  div.verify {
+    text-align: center;
+  }
+  button.verify {
+    border-radius: 5px;
+    font-weight: bold;
+    padding: 10px;
+    margin: 0;
+  }
+}
+
+.identity-key-send-error {
+  button {
+    margin-top: 0px;
+    margin-bottom: 0px;
+  }
+  .explanation {
+    margin-top: 20px;
+  }
+  .safety-number {
+    margin-top: 30px;
+    text-align: center;
+  }
+  .actions {
+    margin-top: 30px;
+    text-align: center;
+  }
 }
 
 .message-detail {
   background-color: #eee;
-
-  .key-conflict-dialogue {
-    border-radius: $border-radius;
-    margin: 20px 0;
-
-    .header {
-      border-radius: $border-radius $border-radius 0 0;
-      background: #F3F3A7;
-      margin: 0;
-      padding: 10px 20px
-    }
-    .content {
-      padding: 20px;
-      border: 2px solid #F3F3A7;
-    }
-
-    button.resolve {
-      outline: none;
-      border: none;
-      border-radius: $border-radius;
-      color: white;
-      font-weight: bold;
-      line-height: 36px;
-      padding: 0 20px;
-      float: right;
-      background: $blue;
-      margin-left: 20px;
-    }
-
-    .hideKeys, .showKeys {
-      float: right;
-      line-height: 36px;
-    }
-  }
 
   .message-container {
     padding: 20px 0;
@@ -170,12 +242,33 @@
     }
   }
 
+  .retries {
+    padding: 1em;
+  }
+  button.retry {
+    margin: 0.5em;
+  }
+
   .contacts .contact-detail {
     padding: 0 36px;
     margin-bottom: 5px;
 
     .error-icon-container {
       float: right;
+    }
+
+    button.error {
+      background-color: red;
+      color: white;
+
+      span.icon.error {
+        display: inline-block;
+        width: 1.25em;
+        height: 1.25em;
+        position: relative;
+        vertical-align: middle;
+        @include color-svg('/images/warning.svg', white);
+      }
     }
 
     .error-message {
@@ -192,14 +285,19 @@
     padding: 5px;
   }
 
-  button.conflict {
-    float: right;
-    background: #d00;
-  }
   button.cancel {
     float: right;
     color: $grey_d;
     border: solid 1px #ccc;
+  }
+
+  .delete-container {
+    text-align: center;
+
+    button.delete {
+      background-color: red;
+      color: white;
+    }
   }
 }
 .message-list {
@@ -261,7 +359,6 @@ li.entry .error-icon-container {
   height: $error-icon-size;
   position: relative;
   @include color-svg('/images/warning.svg', red);
-
 }
 
 .group {
@@ -360,6 +457,13 @@ li.entry .error-icon-container {
 
     .retry {
       text-decoration: underline;
+      cursor: pointer;
+    }
+
+    .some-failed {
+      float: left;
+      margin-left: 6px;
+      margin-right: 6px;
       cursor: pointer;
     }
 
@@ -476,6 +580,7 @@ li.entry .error-icon-container {
     .fileView {
       display: flex;
       align-items: center;
+      overflow: hidden;
 
       position: relative;
       padding: 5px;
@@ -486,6 +591,13 @@ li.entry .error-icon-container {
       .fileName {
         font-weight: bold;
         margin-bottom: 0.25em;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+
+      .text {
+        overflow: hidden;
       }
 
       .icon, .text {
@@ -503,21 +615,17 @@ li.entry .error-icon-container {
         margin-right: 0.5em;
         display: inline-block;
         vertical-align: middle;
-        &:before {
-          content: '';
-          display: inline-block;
-          width: $button-height * 2;
-          height: $button-height * 2;
-          @include color-svg('/images/file.svg', $grey_d);
-        }
+        width: $button-height * 2;
+        height: $button-height * 2;
+        @include color-svg('/images/file.svg', $grey_d);
 
-        &.audio:before {
+        &.audio {
           @include color-svg('/images/audio.svg', $grey_d);
         }
-        &.video:before {
+        &.video {
           @include color-svg('/images/video.svg', $grey_d);
         }
-        &.voice:before {
+        &.voice {
           @include color-svg('/images/voice.svg', $grey_d);
         }
       }
@@ -533,19 +641,10 @@ li.entry .error-icon-container {
     cursor: pointer;
     font-style: italic;
   }
-
-  .key-conflict {
-    padding: 15px 10px;
-
-    button {
-      margin-top: 5px;
-    }
-  }
 }
 
 .message-list,
-.message-container,
-.key-conflict-dialogue {
+.message-container {
   .avatar {
     height: 36px;
     width: 36px;
@@ -656,10 +755,6 @@ li.entry .error-icon-container {
     overflow: auto;
     box-shadow: 0px 0px 15px 0px rgba(0, 0, 0, 0.3);
 
-    .message {
-      text-align: center;
-    }
-
     .buttons {
       margin-top: 10px;
 
@@ -668,13 +763,8 @@ li.entry .error-icon-container {
         margin-left: 10px;
         background-color: $grey_l;
         border-radius: $border-radius;
-        outline: none;
         padding: 5px 8px;
         border: 1px solid $grey_l2;
-
-        &:focus {
-          border-color: $grey_l4;
-        }
 
         &:hover {
           background-color: $grey_l2;
@@ -684,14 +774,42 @@ li.entry .error-icon-container {
     }
   }
 }
-.message-list li.keychange {
+.advisory .icon {
+  height: 1.25em;
+  width: 1.25em;
+  vertical-align: text-bottom;
+  display: inline-block;
+
+  &.verified {
+    @include color-svg('/images/verified-check.svg', $grey_d);
+  }
+  &.shield {
+    @include color-svg('/images/shield.svg', $grey_d);
+  }
+  &.clock {
+    @include color-svg('/images/clock.svg', $grey_d);
+  }
+}
+
+.keychange {
   text-align: center;
   .content {
     cursor: pointer;
     display: inline-block;
     padding: 5px 10px;
     background: #fff5c4;
-    color: $grey_d;
+    border-radius: $border-radius;
+  }
+}
+
+.verified-change {
+  text-align: center;
+
+  .content {
+    cursor: pointer;
+    display: inline-block;
+    padding: 5px 10px;
+    background: #fff5c4;
     border-radius: $border-radius;
   }
 }

@@ -13,9 +13,13 @@
             this.on('destroy', this.revokeImageUrl);
             this.on('change:expirationStartTimestamp', this.setToExpire);
             this.on('change:expireTimer', this.setToExpire);
+            this.on('unload', this.revokeImageUrl);
             this.setToExpire();
         },
-        defaults  : function() {
+        idForLogging: function() {
+            return this.get('source') + '.' + this.get('sourceDevice') + ' ' + this.get('sent_at');
+        },
+        defaults: function() {
             return {
                 timestamp: new Date().getTime(),
                 attachments: []
@@ -87,9 +91,6 @@
             }
             if (this.isEndSession()) {
                 return i18n('sessionEnded');
-            }
-            if (this.isIncoming() && this.hasKeyConflicts()) {
-                return i18n('incomingKeyConflict');
             }
             if (this.isIncoming() && this.hasErrors()) {
                 return i18n('incomingError');
@@ -185,31 +186,23 @@
             }
             return this.modelForKeyChange;
         },
+        getModelForVerifiedChange: function() {
+            var id = this.get('verifiedChanged');
+            if (!this.modelForVerifiedChange) {
+              var c = ConversationController.get(id);
+              if (!c) {
+                  c = ConversationController.create({ id: id, type: 'private' });
+                  c.fetch();
+              }
+              this.modelForVerifiedChange = c;
+            }
+            return this.modelForVerifiedChange;
+        },
         isOutgoing: function() {
             return this.get('type') === 'outgoing';
         },
         hasErrors: function() {
             return _.size(this.get('errors')) > 0;
-        },
-        hasKeyConflicts: function() {
-            return _.any(this.get('errors'), function(e) {
-                return (e.name === 'IncomingIdentityKeyError' ||
-                        e.name === 'OutgoingIdentityKeyError');
-            });
-        },
-        hasKeyConflict: function(number) {
-            return _.any(this.get('errors'), function(e) {
-                return (e.name === 'IncomingIdentityKeyError' ||
-                        e.name === 'OutgoingIdentityKeyError') &&
-                        e.number === number;
-            });
-        },
-        getKeyConflict: function(number) {
-            return _.find(this.get('errors'), function(e) {
-                return (e.name === 'IncomingIdentityKeyError' ||
-                        e.name === 'OutgoingIdentityKeyError') &&
-                        e.number === number;
-            });
         },
 
         send: function(promise) {
@@ -229,20 +222,54 @@
                     this.set({dataMessage: result.dataMessage});
                 }
 
+                var promises = [];
+
                 if (result instanceof Error) {
                     this.saveErrors(result);
                     if (result.name === 'SignedPreKeyRotationError') {
-                        getAccountManager().rotateSignedPreKey();
+                        promises.push(getAccountManager().rotateSignedPreKey());
+                    }
+                    else if (result.name === 'OutgoingIdentityKeyError') {
+                        var c = ConversationController.get(result.number);
+                        promises.push(c.getProfiles());
                     }
                 } else {
                     this.saveErrors(result.errors);
                     if (result.successfulNumbers.length > 0) {
                         this.set({sent: true, expirationStartTimestamp: now});
-                        this.sendSyncMessage();
+                        promises.push(this.sendSyncMessage());
                     }
+                    promises = promises.concat(_.map(result.errors, function(error) {
+                        if (error.name === 'OutgoingIdentityKeyError') {
+                            var c = ConversationController.get(error.number);
+                            promises.push(c.getProfiles());
+                        }
+                    }));
                 }
 
+                return Promise.all(promises).then(function() {
+                    this.trigger('send-error', this.get('errors'));
+                }.bind(this));
             }.bind(this));
+        },
+
+        someRecipientsFailed: function() {
+            var c = this.getConversation();
+            if (c.isPrivate()) {
+                return false;
+            }
+
+            var recipients = c.contactCollection.length - 1;
+            var errors = this.get('errors');
+            if (!errors) {
+                return false;
+            }
+
+            if (errors.length > 0 && recipients > 0 && errors.length < recipients) {
+                return true;
+            }
+
+            return false;
         },
 
         sendSyncMessage: function() {
@@ -281,15 +308,6 @@
             return this.save({errors : errors});
         },
 
-        removeConflictFor: function(number) {
-            var errors = _.reject(this.get('errors'), function(e) {
-                return e.number === number &&
-                    (e.name === 'IncomingIdentityKeyError' ||
-                     e.name === 'OutgoingIdentityKeyError');
-            });
-            this.set({errors: errors});
-        },
-
         hasNetworkError: function(number) {
             var error = _.find(this.get('errors'), function(e) {
                 return (e.name === 'MessageError' ||
@@ -305,7 +323,8 @@
                     (e.name === 'MessageError' ||
                      e.name === 'OutgoingMessageError' ||
                      e.name === 'SendMessageNetworkError' ||
-                     e.name === 'SignedPreKeyRotationError');
+                     e.name === 'SignedPreKeyRotationError' ||
+                     e.name === 'OutgoingIdentityKeyError');
             });
             this.set({errors: errors[1]});
             return errors[0][0];
@@ -314,9 +333,9 @@
             return (e.name === 'MessageError' ||
                     e.name === 'OutgoingMessageError' ||
                     e.name === 'SendMessageNetworkError' ||
-                    e.name === 'SignedPreKeyRotationError');
+                    e.name === 'SignedPreKeyRotationError' ||
+                    e.name === 'OutgoingIdentityKeyError');
         },
-
         resend: function(number) {
             var error = this.removeOutgoingErrors(number);
             if (error) {
@@ -324,32 +343,10 @@
                 this.send(promise);
             }
         },
+        handleDataMessage: function(dataMessage, confirm, options) {
+            options = options || {};
+            _.defaults(options, {initialLoadComplete: true});
 
-        resolveConflict: function(number) {
-            var error = this.getKeyConflict(number);
-            if (error) {
-                this.removeConflictFor(number);
-                var promise = new textsecure.ReplayableError(error).replay();
-                if (this.isIncoming()) {
-                    promise = promise.then(function(dataMessage) {
-                        this.removeConflictFor(number);
-                        this.handleDataMessage(dataMessage);
-                    }.bind(this));
-                } else {
-                    promise = this.send(promise).then(function() {
-                        this.removeConflictFor(number);
-                        this.save();
-                    }.bind(this));
-                }
-                promise.catch(function(e) {
-                    this.removeConflictFor(number);
-                    this.saveErrors(e);
-                }.bind(this));
-
-                return promise;
-            }
-        },
-        handleDataMessage: function(dataMessage) {
             // This function can be called from the background script on an
             // incoming message or from the frontend after the user accepts an
             // identity key change.
@@ -361,10 +358,14 @@
             if (dataMessage.group) {
                 conversationId = dataMessage.group.id;
             }
+            console.log('queuing handleDataMessage', message.idForLogging());
+
             var conversation = ConversationController.create({id: conversationId});
-            conversation.queueJob(function() {
+            return conversation.queueJob(function() {
                 return new Promise(function(resolve) {
                     conversation.fetch().always(function() {
+                        console.log('starting handleDataMessage', message.idForLogging());
+
                         var now = new Date().getTime();
                         var attributes = { type: 'private' };
                         if (dataMessage.group) {
@@ -473,28 +474,61 @@
                                 timestamp: message.get('sent_at')
                             });
                         }
+
+                        console.log('beginning saves in handleDataMessage', message.idForLogging());
+
+                        var handleError = function(error) {
+                            error = error && error.stack ? error.stack : error;
+                            console.log('handleDataMessage', message.idForLogging(), 'error:', error);
+                            return resolve();
+                        };
+
                         message.save().then(function() {
                             conversation.save().then(function() {
-                                conversation.trigger('newmessage', message);
+                                try {
+                                    conversation.trigger('newmessage', message);
+                                }
+                                catch (e) {
+                                    return handleError(e);
+                                }
                                 // We fetch() here because, between the message.save() above and the previous
                                 //   line's trigger() call, we might have marked all messages unread in the
                                 //   database. This message might already be read!
                                 var previousUnread = message.get('unread');
                                 message.fetch().then(function() {
-                                    if (previousUnread !== message.get('unread')) {
-                                        console.log('Caught race condition on new message read state! ' +
-                                                    'Manually starting timers.');
-                                        // We call markRead() even though the message is already marked read
-                                        //   because we need to start expiration timers, etc.
-                                        message.markRead();
+                                    try {
+                                        if (previousUnread !== message.get('unread')) {
+                                            console.log('Caught race condition on new message read state! ' +
+                                                        'Manually starting timers.');
+                                            // We call markRead() even though the message is already marked read
+                                            //   because we need to start expiration timers, etc.
+                                            message.markRead();
+                                        }
+                                        if (message.get('unread') && options.initialLoadComplete) {
+                                            conversation.notify(message);
+                                        }
+
+                                        console.log('done with handleDataMessage', message.idForLogging());
+
+                                        confirm();
+                                        return resolve();
                                     }
-                                    if (message.get('unread')) {
-                                        conversation.notify(message);
+                                    catch (e) {
+                                        handleError(e);
                                     }
-                                    resolve();
+                                }, function(error) {
+                                    try {
+                                        console.log('handleDataMessage: Message', message.idForLogging(), 'was deleted');
+
+                                        confirm();
+                                        return resolve();
+                                    }
+                                    catch (e) {
+                                        handleError(e);
+                                    }
                                 });
-                            });
-                        });
+                            }, handleError);
+                        }, handleError);
                     });
                 });
             });
@@ -507,7 +541,9 @@
             Whisper.Notifications.remove(Whisper.Notifications.where({
                 messageId: this.id
             }));
-            return this.save();
+            return new Promise(function(resolve, reject) {
+                this.save().then(resolve, reject);
+            }.bind(this));
         },
         isExpiring: function() {
             return this.get('expireTimer') && this.get('expirationStartTimestamp');
@@ -533,7 +569,15 @@
                 var start = this.get('expirationStartTimestamp');
                 var delta = this.get('expireTimer') * 1000;
                 var expires_at = start + delta;
-                this.save('expires_at', expires_at);
+
+                // This method can be called due to the expiration-related .set() calls in
+                //   handleDataMessage(), but the .save() here would conflict with the
+                //   same call at the end of handleDataMessage(). So we only call .save()
+                //   here if we've previously saved this model.
+                if (!this.isNew()) {
+                    this.save('expires_at', expires_at);
+                }
+
                 Whisper.ExpiringMessagesListener.update();
                 console.log('message', this.get('sent_at'), 'expires at', expires_at);
             }
@@ -545,7 +589,13 @@
         model      : Message,
         database   : Whisper.Database,
         storeName  : 'messages',
-        comparator : 'received_at',
+        comparator : function(left, right) {
+            if (left.get('received_at') === right.get('received_at')) {
+                return (left.get('sent_at') || 0) - (right.get('sent_at') || 0);
+            }
+
+            return (left.get('received_at') || 0) - (right.get('received_at') || 0);
+        },
         initialize : function(models, options) {
             if (options) {
                 this.conversation = options.conversation;
@@ -572,12 +622,9 @@
         },
 
         getLoadedUnreadCount: function() {
-            return this.models.reduce(function(total, model) {
-                var count = model.get('unread');
-                if (count === undefined) {
-                    count = 0;
-                }
-                return total + count;
+            return this.reduce(function(total, model) {
+                var unread = model.get('unread') && model.isIncoming();
+                return total + (unread ? 1 : 0);
             }, 0);
         },
 
@@ -612,19 +659,20 @@
                     // SELECT messages WHERE conversationId = this.id ORDER
                     // received_at DESC
                 };
-                this.fetch(options).then(resolve);
+                this.fetch(options).always(resolve);
             }.bind(this)).then(function() {
                 if (unreadCount > 0) {
-                    if (unreadCount <= startingLoadedUnread) {
+                    var loadedUnread = this.getLoadedUnreadCount();
+                    if (loadedUnread >= unreadCount) {
                         return;
                     }
 
-                    var loadedUnread = this.getLoadedUnreadCount();
                     if (startingLoadedUnread === loadedUnread) {
                         // that fetch didn't get us any more unread. stop fetching more.
                         return;
                     }
 
+                    console.log('fetchConversation: doing another fetch to get all unread');
                     return this.fetchConversation(conversationId, limit, unreadCount);
                 }
             }.bind(this));
@@ -640,10 +688,6 @@
                 conditions: { expires_at: { $lte: Date.now() } },
                 addIndividually: true
             });
-        },
-
-        hasKeyConflicts: function() {
-            return this.any(function(m) { return m.hasKeyConflicts(); });
         }
     });
 })();

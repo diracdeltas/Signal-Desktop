@@ -143,14 +143,63 @@ MessageSender.prototype = {
         return outgoing.transmitMessage(number, jsonData, timestamp);
     },
 
+    validateRetryContentMessage: function(content) {
+        // We want at least one field set, but not more than one
+        var count = 0;
+        count += content.syncMessage ? 1 : 0;
+        count += content.dataMessage ? 1 : 0;
+        count += content.callMessage ? 1 : 0;
+        count += content.nullMessage ? 1 : 0;
+        if (count !== 1) {
+            return false;
+        }
+
+        // It's most likely that dataMessage will be populated, so we look at it in detail
+        var data = content.dataMessage;
+        if (data && !data.attachments.length && !data.body && !data.expireTimer && !data.flags && !data.group) {
+            return false;
+        }
+
+        return true;
+    },
+
+    getRetryProto: function(message, timestamp) {
+        // If message was sent before v0.41.3 was released on Aug 7, then it was most certainly a DataMessage
+        //
+        // var d = new Date('2017-08-07T07:00:00.000Z');
+        // d.getTime();
+        var august7 = 1502089200000;
+        if (timestamp < august7) {
+            return textsecure.protobuf.DataMessage.decode(message);
+        }
+
+        // This is ugly. But we don't know what kind of proto we need to decode...
+        try {
+            // Simply decoding as a Content message may throw
+            var proto = textsecure.protobuf.Content.decode(message);
+
+            // But it might also result in an invalid object, so we try to detect that
+            if (this.validateRetryContentMessage(proto)) {
+                return proto;
+            }
+
+            return textsecure.protobuf.DataMessage.decode(message);
+        } catch(e) {
+            // If this call throws, something has really gone wrong, we'll fail to send
+            return textsecure.protobuf.DataMessage.decode(message);
+        }
+    },
+
     tryMessageAgain: function(number, encodedMessage, timestamp) {
-        var proto = textsecure.protobuf.DataMessage.decode(encodedMessage);
+        var proto = this.getRetryProto(encodedMessage, timestamp);
         return this.sendIndividualProto(number, proto, timestamp);
     },
 
     queueJobForNumber: function(number, runJob) {
+        var taskWithTimeout = textsecure.createTaskWithTimeout(runJob, 'queueJobForNumber ' + number);
+
         var runPrevious = this.pendingMessages[number] || Promise.resolve();
-        var runCurrent = this.pendingMessages[number] = runPrevious.then(runJob, runJob);
+        var runCurrent = this.pendingMessages[number] = runPrevious.then(taskWithTimeout, taskWithTimeout);
         runCurrent.then(function() {
             if (this.pendingMessages[number] === runCurrent) {
                 delete this.pendingMessages[number];
@@ -230,6 +279,19 @@ MessageSender.prototype = {
         }.bind(this));
     },
 
+    createSyncMessage: function() {
+        var syncMessage = new textsecure.protobuf.SyncMessage();
+
+        // Generate a random int from 1 and 512
+        var buffer = libsignal.crypto.getRandomBytes(1);
+        var paddingLength = (new Uint8Array(buffer)[0] & 0x1ff) + 1;
+
+        // Generate a random padding buffer of the chosen size
+        syncMessage.padding = libsignal.crypto.getRandomBytes(paddingLength);
+
+        return syncMessage;
+    },
+
     sendSyncMessage: function(encodedDataMessage, timestamp, destination, expirationStartTimestamp) {
         var myNumber = textsecure.storage.user.getNumber();
         var myDevice = textsecure.storage.user.getDeviceId();
@@ -247,11 +309,15 @@ MessageSender.prototype = {
         if (expirationStartTimestamp) {
             sentMessage.expirationStartTimestamp = expirationStartTimestamp;
         }
-        var syncMessage = new textsecure.protobuf.SyncMessage();
+        var syncMessage = this.createSyncMessage();
         syncMessage.sent = sentMessage;
         var contentMessage = new textsecure.protobuf.Content();
         contentMessage.syncMessage = syncMessage;
         return this.sendIndividualProto(myNumber, contentMessage, Date.now());
+    },
+
+    getProfile: function(number) {
+        return this.server.getProfile(number);
     },
 
     sendRequestGroupSyncMessage: function() {
@@ -260,13 +326,15 @@ MessageSender.prototype = {
         if (myDevice != 1) {
             var request = new textsecure.protobuf.SyncMessage.Request();
             request.type = textsecure.protobuf.SyncMessage.Request.Type.GROUPS;
-            var syncMessage = new textsecure.protobuf.SyncMessage();
+            var syncMessage = this.createSyncMessage();
             syncMessage.request = request;
             var contentMessage = new textsecure.protobuf.Content();
             contentMessage.syncMessage = syncMessage;
 
             return this.sendIndividualProto(myNumber, contentMessage, Date.now());
         }
+
+        return Promise.resolve();
     },
 
     sendRequestContactSyncMessage: function() {
@@ -275,19 +343,21 @@ MessageSender.prototype = {
         if (myDevice != 1) {
             var request = new textsecure.protobuf.SyncMessage.Request();
             request.type = textsecure.protobuf.SyncMessage.Request.Type.CONTACTS;
-            var syncMessage = new textsecure.protobuf.SyncMessage();
+            var syncMessage = this.createSyncMessage();
             syncMessage.request = request;
             var contentMessage = new textsecure.protobuf.Content();
             contentMessage.syncMessage = syncMessage;
 
             return this.sendIndividualProto(myNumber, contentMessage, Date.now());
         }
+
+        return Promise.resolve();
     },
     syncReadMessages: function(reads) {
         var myNumber = textsecure.storage.user.getNumber();
         var myDevice = textsecure.storage.user.getDeviceId();
         if (myDevice != 1) {
-            var syncMessage = new textsecure.protobuf.SyncMessage();
+            var syncMessage = this.createSyncMessage();
             syncMessage.read = [];
             for (var i = 0; i < reads.length; ++i) {
                 var read = new textsecure.protobuf.SyncMessage.Read();
@@ -300,6 +370,44 @@ MessageSender.prototype = {
 
             return this.sendIndividualProto(myNumber, contentMessage, Date.now());
         }
+
+        return Promise.resolve();
+    },
+    syncVerification: function(destination, state, identityKey) {
+        var myNumber = textsecure.storage.user.getNumber();
+        var myDevice = textsecure.storage.user.getDeviceId();
+        if (myDevice != 1) {
+            // First send a null message to mask the sync message.
+            var nullMessage = new textsecure.protobuf.NullMessage();
+
+            // Generate a random int from 1 and 512
+            var buffer = libsignal.crypto.getRandomBytes(1);
+            var paddingLength = (new Uint8Array(buffer)[0] & 0x1ff) + 1;
+
+            // Generate a random padding buffer of the chosen size
+            nullMessage.padding = libsignal.crypto.getRandomBytes(paddingLength);
+
+            var contentMessage = new textsecure.protobuf.Content();
+            contentMessage.nullMessage = nullMessage;
+
+            return this.sendIndividualProto(destination, contentMessage, Date.now()).then(function() {
+                var verified = new textsecure.protobuf.Verified();
+                verified.state = state;
+                verified.destination = destination;
+                verified.identityKey = identityKey;
+                verified.nullMessage = nullMessage.padding;
+
+                var syncMessage = this.createSyncMessage();
+                syncMessage.verified = verified;
+
+                var contentMessage = new textsecure.protobuf.Content();
+                contentMessage.syncMessage = syncMessage;
+
+                return this.sendIndividualProto(myNumber, contentMessage, Date.now());
+            }.bind(this));
+        }
+
+        return Promise.resolve();
     },
 
     sendGroupProto: function(numbers, proto, timestamp) {
@@ -544,7 +652,9 @@ textsecure.MessageSender = function(url, ports, username, password) {
     this.setGroupAvatar                    = sender.setGroupAvatar                   .bind(sender);
     this.leaveGroup                        = sender.leaveGroup                       .bind(sender);
     this.sendSyncMessage                   = sender.sendSyncMessage                  .bind(sender);
+    this.getProfile                        = sender.getProfile                       .bind(sender);
     this.syncReadMessages                  = sender.syncReadMessages                 .bind(sender);
+    this.syncVerification                  = sender.syncVerification                 .bind(sender);
 };
 
 textsecure.MessageSender.prototype = {
